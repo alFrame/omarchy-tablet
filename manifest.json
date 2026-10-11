@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.mug.tablet",
-  "name": "Tablet",
+  "id": "io.github.mug31.wacom-bamboo",
+  "name": "Wacom Bamboo",
   "version": "0.1.0",
   "homepage": "https://github.com/mug31/omarchy-tablet",
   "author": "mug31",
@@ -14,7 +14,7 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "Tablet",
+    "displayName": "Wacom Bamboo",
     "description": "Tweak the Wacom pen and finger touch from the bar.",
     "category": "System",
     "defaultSection": "right",

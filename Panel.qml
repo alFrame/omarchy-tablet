@@ -11,7 +11,7 @@ import qs.Ui
 // (bin/tablet-buttons), which watches the same settings file.
 Panel {
   id: root
-  moduleName: "io.github.mug.tablet"
+  moduleName: "io.github.mug31.wacom-bamboo"
   ipcTarget: "tablet"
 
   property var settings_: ({})

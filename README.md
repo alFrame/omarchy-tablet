@@ -1,4 +1,4 @@
-# Omarchy Tablet
+# Wacom Bamboo for Omarchy
 
 A bar widget for the [Omarchy](https://omarchy.org) shell that sets up a Wacom
 pen tablet from the bar: which display the pen draws on, rotation, active area,
@@ -70,7 +70,7 @@ systemctl --user disable --now tablet-buttons.service
 rm ~/.config/systemd/user/tablet-buttons.service
 sed -i '/require("hypr.tablet")/d' ~/.config/hypr/hyprland.lua
 rm ~/.config/hypr/tablet.lua ~/.config/omarchy/tablet.json
-omarchy plugin remove io.github.mug.tablet
+omarchy plugin remove io.github.mug31.wacom-bamboo
 ```
 
 ## License
