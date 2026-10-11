@@ -893,7 +893,7 @@ Panel {
         width: parent.width
         implicitHeight: Math.max(valueField.implicitHeight, presetPicker.implicitHeight)
 
-      TextField {
+      PlainField {
         id: valueField
         anchors.left: parent.left
         anchors.right: presetPicker.left
@@ -901,12 +901,7 @@ Panel {
         anchors.verticalCenter: parent.verticalCenter
         text: String(buttonRow.spec.value || "")
         placeholderText: buttonRow.spec.action === "key" ? "e.g. ctrl+z, ctrl+shift+s, super+w" : "e.g. omarchy launch browser"
-        foreground: root.fg
-        font.family: root.uiFont
-        font.pixelSize: Style.font.bodySmall
-        onActiveFocusChanged: root.editing = activeFocus
         onEditingFinished: if (text !== String(buttonRow.spec.value || "")) root.setButton(buttonRow.key, { value: text })
-        Keys.onEscapePressed: keyCatcher.forceActiveFocus()
       }
 
       Dropdown {
@@ -944,6 +939,102 @@ Panel {
           testProc.running = true
         }
       }
+      }
+    }
+  }
+
+  // One-line text field built on TextEdit rather than TextInput/TextField.
+  // Qt's TextInput reads the whole clipboard offer every time the clipboard
+  // changes (to update canPaste), with no size limit or timeout, which lets
+  // any clipboard owner stall or bloat the shared shell. TextEdit only looks
+  // at the offered formats. Pasting goes through wl-paste in its own process
+  // instead, capped at 2 s and 1 KB; dropped text is ignored.
+  component PlainField: Rectangle {
+    id: field
+    property alias text: edit.text
+    property string placeholderText: ""
+    signal editingFinished()
+
+    function paste() {
+      if (pasteProc.running) return
+      pasteProc.running = true
+    }
+
+    implicitHeight: Style.spacing.controlHeight
+    radius: Style.cornerRadius
+    color: "transparent"
+    border.width: 1
+    border.color: edit.activeFocus ? Color.accent : Qt.rgba(root.fg.r, root.fg.g, root.fg.b, mouse.containsMouse ? 0.7 : 0.4)
+
+    TextEdit {
+      id: edit
+      anchors.fill: parent
+      anchors.leftMargin: Style.spacing.controlPaddingX
+      anchors.rightMargin: Style.spacing.controlPaddingX
+      verticalAlignment: TextEdit.AlignVCenter
+      textFormat: TextEdit.PlainText
+      wrapMode: TextEdit.NoWrap
+      clip: true
+      selectByMouse: true
+      color: root.fg
+      selectionColor: Style.selectionFillFor(root.fg, Color.accent)
+      selectedTextColor: root.fg
+      font.family: root.uiFont
+      font.pixelSize: Style.font.bodySmall
+
+      onActiveFocusChanged: {
+        root.editing = activeFocus
+        if (!activeFocus) field.editingFinished()
+      }
+      Keys.onPressed: function(event) {
+        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Escape) {
+          keyCatcher.forceActiveFocus()
+          event.accepted = true
+        } else if (event.matches(StandardKey.Paste)
+                   || (event.key === Qt.Key_V && (event.modifiers & Qt.ControlModifier))) {
+          field.paste()
+          event.accepted = true
+        } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+          event.accepted = true
+        }
+      }
+    }
+
+    Text {
+      visible: edit.text === "" && !edit.activeFocus
+      anchors.left: edit.left
+      anchors.right: edit.right
+      anchors.verticalCenter: parent.verticalCenter
+      textFormat: Text.PlainText
+      text: field.placeholderText
+      elide: Text.ElideRight
+      color: root.dim
+      font: edit.font
+    }
+
+    // Middle-click would paste the primary selection through Qt's reader.
+    MouseArea {
+      id: mouse
+      anchors.fill: parent
+      hoverEnabled: true
+      acceptedButtons: Qt.MiddleButton
+      cursorShape: Qt.IBeamCursor
+      onClicked: { edit.forceActiveFocus(); field.paste() }
+    }
+
+    DropArea { anchors.fill: parent; onDropped: function(drop) { drop.accepted = true } }
+
+    Process {
+      id: pasteProc
+      command: ["sh", "-c", "timeout 2 wl-paste --no-newline --type text 2>/dev/null | head -c 1024"]
+      stdout: StdioCollector {
+        waitForEnd: true
+        onStreamFinished: {
+          var t = String(text).replace(/[\r\n\t]+/g, " ")
+          if (t === "") return
+          if (edit.selectedText !== "") edit.remove(edit.selectionStart, edit.selectionEnd)
+          edit.insert(edit.cursorPosition, t)
+        }
       }
     }
   }
