@@ -1,0 +1,279 @@
+#!/usr/bin/python3
+"""Button remapper for the Wacom Bamboo Pen & Touch (CTH-460).
+
+Runs as the tablet-buttons user service. Reads the "buttons" section of
+~/.config/omarchy/tablet.json and re-reads it whenever the file changes.
+
+Pad: the four ExpressKeys are grabbed and turned into clicks, shortcuts or
+commands.
+
+Pen: left alone while both side buttons are on "default". Once either is
+remapped, the real pen is grabbed and replayed through a virtual clone
+("... Pen Remap") so pressure and tilt keep working, with the remapped
+buttons swallowed and turned into their action instead.
+
+Every press is also written to ~/.cache/omarchy-tablet/last-button so the
+bar panel can light up the row of the button that was pressed.
+"""
+import asyncio
+import json
+import os
+import shlex
+import subprocess
+import sys
+import time
+
+import evdev
+from evdev import ecodes as e
+
+HOME = os.path.expanduser("~")
+STATE = os.path.join(HOME, ".config/omarchy/tablet.json")
+LAST = os.path.join(HOME, ".cache/omarchy-tablet/last-button")
+# Present while the panel's "Identify keys" runs: presses are reported, not acted on.
+IDENTIFY = os.path.join(HOME, ".cache/omarchy-tablet/identify")
+
+PEN_NAME = "Wacom BambooPT 2FG 4x5 Pen"
+PAD_NAME = "Wacom BambooPT 2FG 4x5 Pad"
+VIRTUAL_PEN_NAME = PEN_NAME + " Remap"
+
+PEN_BUTTONS = {e.BTN_STYLUS: "pen1", e.BTN_STYLUS2: "pen2"}
+PAD_BUTTONS = {e.BTN_LEFT: "pad1", e.BTN_FORWARD: "pad2", e.BTN_BACK: "pad3", e.BTN_RIGHT: "pad4"}
+
+DEFAULT_BUTTONS = {
+    "pen1": {"action": "default", "value": ""},
+    "pen2": {"action": "default", "value": ""},
+    "pad1": {"action": "key", "value": "ctrl+z"},
+    "pad2": {"action": "key", "value": "ctrl+shift+z"},
+    "pad3": {"action": "right", "value": ""},
+    "pad4": {"action": "middle", "value": ""},
+}
+
+CLICKS = {"left": e.BTN_LEFT, "right": e.BTN_RIGHT, "middle": e.BTN_MIDDLE}
+MODIFIERS = {
+    "ctrl": e.KEY_LEFTCTRL, "control": e.KEY_LEFTCTRL,
+    "shift": e.KEY_LEFTSHIFT,
+    "alt": e.KEY_LEFTALT,
+    "super": e.KEY_LEFTMETA, "meta": e.KEY_LEFTMETA, "win": e.KEY_LEFTMETA,
+}
+KEY_ALIASES = {
+    "esc": "ESC", "escape": "ESC", "return": "ENTER", "del": "DELETE",
+    "pgup": "PAGEUP", "pgdn": "PAGEDOWN", "[": "LEFTBRACE", "]": "RIGHTBRACE",
+    "-": "MINUS", "=": "EQUAL", "+": "EQUAL", ",": "COMMA", ".": "DOT",
+    "/": "SLASH", ";": "SEMICOLON", "'": "APOSTROPHE", "`": "GRAVE",
+    "\\": "BACKSLASH", "plus": "EQUAL", "minus": "MINUS",
+}
+
+
+def log(*args):
+    print(*args, file=sys.stderr, flush=True)
+
+
+def parse_combo(text):
+    """'ctrl+shift+z' -> [KEY_LEFTCTRL, KEY_LEFTSHIFT, KEY_Z], or None."""
+    parts = [p.strip().lower() for p in str(text).replace(" ", "").split("+")]
+    # "ctrl++" means ctrl and the plus key.
+    if str(text).endswith("++"):
+        parts = parts[:-2] + ["+"]
+    codes = []
+    for part in parts:
+        if not part:
+            return None
+        if part in MODIFIERS:
+            codes.append(MODIFIERS[part])
+            continue
+        name = KEY_ALIASES.get(part, part.upper())
+        code = getattr(e, "KEY_" + name, None)
+        if code is None:
+            return None
+        codes.append(code)
+    return codes or None
+
+
+def load_buttons():
+    buttons = {k: dict(v) for k, v in DEFAULT_BUTTONS.items()}
+    try:
+        with open(STATE) as f:
+            saved = json.load(f).get("buttons", {})
+        for key, value in saved.items():
+            if key in buttons and isinstance(value, dict):
+                buttons[key].update(value)
+    except (OSError, ValueError, AttributeError):
+        pass
+    return buttons
+
+
+def identifying():
+    try:
+        return time.time() - os.stat(IDENTIFY).st_mtime < 120
+    except OSError:
+        return False
+
+
+def mark(button, down):
+    if not down:
+        return
+    try:
+        os.makedirs(os.path.dirname(LAST), exist_ok=True)
+        with open(LAST, "w") as f:
+            f.write(f"{button} {time.time():.3f}\n")
+    except OSError:
+        pass
+
+
+class Outputs:
+    """Virtual keyboard and mouse the actions are typed and clicked through."""
+
+    def __init__(self):
+        keys = [c for c in range(e.KEY_ESC, e.KEY_MICMUTE + 1)]
+        self.kbd = evdev.UInput({e.EV_KEY: keys}, name="Tablet Buttons Keyboard")
+        self.mouse = evdev.UInput(
+            {e.EV_KEY: list(CLICKS.values()), e.EV_REL: [e.REL_X, e.REL_Y, e.REL_WHEEL]},
+            name="Tablet Buttons Mouse",
+        )
+        self.held = {}
+
+    def press(self, button, spec, down):
+        action = spec.get("action", "none")
+        value = spec.get("value", "")
+        if action in CLICKS:
+            self.mouse.write(e.EV_KEY, CLICKS[action], 1 if down else 0)
+            self.mouse.syn()
+        elif action == "key":
+            if down:
+                codes = parse_combo(value)
+                if not codes:
+                    log(f"{button}: cannot parse shortcut {value!r}")
+                    return
+                self.held[button] = codes
+                for code in codes:
+                    self.kbd.write(e.EV_KEY, code, 1)
+                self.kbd.syn()
+            else:
+                for code in reversed(self.held.pop(button, [])):
+                    self.kbd.write(e.EV_KEY, code, 0)
+                self.kbd.syn()
+        elif action == "command" and down and value.strip():
+            subprocess.Popen(["sh", "-c", value], start_new_session=True,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def release_all(self):
+        for button in list(self.held):
+            self.press(button, {"action": "key"}, False)
+        for code in CLICKS.values():
+            self.mouse.write(e.EV_KEY, code, 0)
+        self.mouse.syn()
+
+
+def find_path(name):
+    """Event node of the input device called `name`, from /proc (no opening)."""
+    try:
+        with open("/proc/bus/input/devices") as f:
+            blocks = f.read().split("\n\n")
+    except OSError:
+        return None
+    for block in blocks:
+        if f'N: Name="{name}"' not in block:
+            continue
+        for line in block.splitlines():
+            if line.startswith("H: Handlers="):
+                for handler in line.split("=", 1)[1].split():
+                    if handler.startswith("event"):
+                        return "/dev/input/" + handler
+    return None
+
+
+def open_device(path):
+    try:
+        return evdev.InputDevice(path) if path else None
+    except OSError:
+        return None
+
+
+async def run_pad(dev, buttons, out):
+    dev.grab()
+    try:
+        async for ev in dev.async_read_loop():
+            if ev.type == e.EV_KEY and ev.code in PAD_BUTTONS and ev.value in (0, 1):
+                name = PAD_BUTTONS[ev.code]
+                mark(name, ev.value == 1)
+                if ev.value == 1 and identifying():
+                    continue
+                out.press(name, buttons[name], ev.value == 1)
+    finally:
+        try:
+            dev.ungrab()
+        except OSError:
+            pass
+
+
+async def run_pen(dev, buttons, out):
+    remapped = {code for code, name in PEN_BUTTONS.items() if buttons[name]["action"] != "default"}
+    if not remapped:
+        # Nothing to change: leave the real pen alone, only watch for the panel.
+        async for ev in dev.async_read_loop():
+            if ev.type == e.EV_KEY and ev.code in PEN_BUTTONS:
+                mark(PEN_BUTTONS[ev.code], ev.value == 1)
+        return
+
+    caps = dev.capabilities(absinfo=True)
+    caps.pop(e.EV_SYN, None)
+    clone = evdev.UInput(caps, name=VIRTUAL_PEN_NAME, vendor=dev.info.vendor,
+                         product=dev.info.product, version=dev.info.version,
+                         bustype=dev.info.bustype, input_props=dev.input_props())
+    dev.grab()
+    try:
+        async for ev in dev.async_read_loop():
+            if ev.type == e.EV_KEY and ev.code in PEN_BUTTONS:
+                name = PEN_BUTTONS[ev.code]
+                mark(name, ev.value == 1)
+                if ev.code in remapped:
+                    if ev.value in (0, 1):
+                        out.press(name, buttons[name], ev.value == 1)
+                    continue
+            clone.write_event(ev)
+    finally:
+        try:
+            dev.ungrab()
+        except OSError:
+            pass
+        clone.close()
+
+
+def state_mtime():
+    try:
+        return os.stat(STATE).st_mtime
+    except OSError:
+        return 0
+
+
+async def main():
+    out = Outputs()
+    tasks = []
+    signature = None
+    while True:
+        pen_path, pad_path = find_path(PEN_NAME), find_path(PAD_NAME)
+        current = (state_mtime(), pen_path, pad_path)
+        alive = all(not t.done() for t in tasks)
+        if current != signature or not alive:
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            out.release_all()
+            tasks = []
+            buttons = load_buttons()
+            pad, pen = open_device(pad_path), open_device(pen_path)
+            if pad:
+                tasks.append(asyncio.create_task(run_pad(pad, buttons, out)))
+            if pen:
+                tasks.append(asyncio.create_task(run_pen(pen, buttons, out)))
+            log("devices:", "pen" if pen else "-", "pad" if pad else "-",
+                "| pen remap:", [k for k in ("pen1", "pen2") if buttons[k]["action"] != "default"])
+            signature = current
+        await asyncio.sleep(1)
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass

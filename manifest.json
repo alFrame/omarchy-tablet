@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.mug.tablet",
+  "name": "Tablet",
+  "version": "0.1.0",
+  "homepage": "https://github.com/mug31/omarchy-tablet",
+  "author": "mug31",
+  "license": "MIT",
+  "description": "Wacom Bamboo (CTH-460) settings from the bar: target display, rotation, active area, pressure, finger touch, and pen/ExpressKey button remapping.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Tablet",
+    "description": "Tweak the Wacom pen and finger touch from the bar.",
+    "category": "System",
+    "defaultSection": "right",
+    "allowMultiple": false
+  }
+}
