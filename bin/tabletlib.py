@@ -397,3 +397,19 @@ def resolve_buttons(saved, desc):
         fallback = PAD_DEFAULTS[slot["index"]] if slot["index"] < len(PAD_DEFAULTS) else {"action": "none", "value": ""}
         out.setdefault(slot["code"], dict(fallback))
     return out
+
+
+def pen_in_proximity(path):
+    """True while the pen (or its eraser end) hovers over the tablet."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError:
+        return False
+    try:
+        buf = bytearray(96)  # KEY_MAX + 1 bits
+        fcntl.ioctl(fd, 0x80000000 | (len(buf) << 16) | (ord("E") << 8) | 0x18, buf)  # EVIOCGKEY
+        return any(buf[code // 8] >> (code % 8) & 1 for code in (0x140, 0x141))  # BTN_TOOL_PEN/RUBBER
+    except OSError:
+        return False
+    finally:
+        os.close(fd)

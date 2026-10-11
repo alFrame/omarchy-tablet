@@ -149,6 +149,36 @@ class Outputs:
         self.mouse.syn()
 
 
+async def events(dev):
+    """Events from `dev`. Replaces evdev's async_read_loop, whose futures raise
+    InvalidStateError when the task reading them is cancelled."""
+    loop = asyncio.get_running_loop()
+    queue = asyncio.Queue()
+
+    def ready():
+        try:
+            for ev in dev.read():
+                queue.put_nowait(ev)
+        except BlockingIOError:
+            pass
+        except OSError as exc:  # unplugged
+            loop.remove_reader(dev.fd)
+            queue.put_nowait(exc)
+
+    loop.add_reader(dev.fd, ready)
+    try:
+        while True:
+            ev = await queue.get()
+            if isinstance(ev, Exception):
+                raise ev
+            yield ev
+    finally:
+        try:
+            loop.remove_reader(dev.fd)
+        except (ValueError, OSError):
+            pass
+
+
 def open_device(path):
     try:
         return evdev.InputDevice(path) if path else None
@@ -159,7 +189,7 @@ def open_device(path):
 async def run_pad(dev, buttons, out):
     dev.grab()
     try:
-        async for ev in dev.async_read_loop():
+        async for ev in events(dev):
             if ev.type != e.EV_KEY or ev.value not in (0, 1) or 0x140 <= ev.code <= 0x14F:
                 continue
             name = tabletlib.KEY_NAMES.get(ev.code, f"KEY_{ev.code}")
@@ -172,6 +202,7 @@ async def run_pad(dev, buttons, out):
             dev.ungrab()
         except OSError:
             pass
+        dev.close()
 
 
 async def run_pen(dev, buttons, out):
@@ -180,9 +211,12 @@ async def run_pen(dev, buttons, out):
                 if buttons.get(name, {}).get("action", "default") != "default"}
     if not remapped:
         # Nothing to change: leave the real pen alone, only report presses for the panel.
-        async for ev in dev.async_read_loop():
-            if ev.type == e.EV_KEY and ev.code in names:
-                mark(names[ev.code], ev.value == 1)
+        try:
+            async for ev in events(dev):
+                if ev.type == e.EV_KEY and ev.code in names:
+                    mark(names[ev.code], ev.value == 1)
+        finally:
+            dev.close()
         return
 
     caps = dev.capabilities(absinfo=True)
@@ -192,7 +226,7 @@ async def run_pen(dev, buttons, out):
                          bustype=dev.info.bustype, input_props=dev.input_props())
     dev.grab()
     try:
-        async for ev in dev.async_read_loop():
+        async for ev in events(dev):
             if ev.type == e.EV_KEY and ev.code in names:
                 name = names[ev.code]
                 mark(name, ev.value == 1)
@@ -207,6 +241,7 @@ async def run_pen(dev, buttons, out):
         except OSError:
             pass
         clone.close()
+        dev.close()
 
 
 def state_mtime():

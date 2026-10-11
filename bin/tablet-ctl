@@ -9,7 +9,10 @@ Settings live in ~/.config/omarchy/tablet.json; every change regenerates
   tablet-ctl reset                  -> restore defaults
   tablet-ctl setup                  -> one-time install: tablet.lua, hyprland.lua
                                        require line, tablet-buttons user service
+  tablet-ctl unlatch                -> (internal) clear libinput's pen/touch rotation
+                                       latch once the pen is out of proximity
 """
+import time
 import json
 import os
 import subprocess
@@ -161,9 +164,10 @@ def lua_bool(v):
 
 
 def render(s, a, size, pen, finger):
-    # Flipping uses libinput's left-handed mode: it turns the pen and, on Wacom
-    # tablets, the paired touch surface by 180°. Quarter turns can only be done
-    # with Hyprland's transform, which moves the pen alone.
+    # Flipping uses libinput's left-handed mode on the pen only: libinput turns
+    # the paired Wacom touch surface with it. Setting left-handed on the touch
+    # device as well can latch the pen upside down (see unlatch()). Quarter
+    # turns can only be done with Hyprland's transform, which moves the pen alone.
     transform = {0: 0, 90: 1, 180: 0, 270: 3}[s["rotation"]]
     flipped = s["rotation"] == 180
     full = a["w"] >= size[0] - 0.05 and a["h"] >= size[1] - 0.05
@@ -195,7 +199,7 @@ def render(s, a, size, pen, finger):
         blocks.append(f"""hl.device({{
     name = "{finger}",
     enabled = {lua_bool(s["fingerEnabled"])},
-    left_handed = {lua_bool(flipped)},
+    left_handed = false,
     sensitivity = {s["fingerSpeed"]},
     natural_scroll = {lua_bool(s["naturalScroll"])},
     tap_to_click = {lua_bool(s["tapToClick"])},
@@ -218,7 +222,45 @@ def remember(s, desc):
     return s
 
 
+def unlatch(finger):
+    """Clear libinput's pen/touch rotation latch.
+
+    libinput keeps the pen rotated while it believes the paired touch surface
+    is left-handed, and the touch side reports "me or the pen" rather than its
+    own state. 0.2.0 set left-handed on the touch device too, and Hyprland
+    turns that off before the pen's, which left the pen upside down in Normal.
+    Toggling left-handed on the touch device alone makes it report its real
+    state. It must run after the pen's own left-handed change has landed,
+    which libinput defers until the pen leaves proximity, so wait for that."""
+    tablet = tabletlib.detect()
+    pen = tablet and tablet.get("pen")
+    if pen:
+        deadline = time.time() + 120
+        out_since = None
+        while time.time() < deadline:
+            if tabletlib.pen_in_proximity(pen["path"]):
+                out_since = None
+            elif out_since is None:
+                out_since = time.time()
+            elif time.time() - out_since > 0.5:
+                break
+            time.sleep(0.1)
+    for value in ("true", "false"):
+        subprocess.run(["hyprctl", "eval", f'hl.device({{ name = "{finger}", left_handed = {value} }})'],
+                       capture_output=True, timeout=5)
+
+
+def spawn_unlatch():
+    subprocess.Popen([os.path.realpath(__file__), "unlatch"], start_new_session=True,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def write(s):
+    try:
+        with open(STATE) as f:
+            previous_rotation = json.load(f).get("rotation", 0)
+    except (OSError, ValueError, AttributeError):
+        previous_rotation = None
     tablet, desc = current_tablet(s)
     s = remember(s, desc)
     dev = s["lastDevice"]
@@ -234,6 +276,8 @@ def write(s):
         f.write(render(s, area(s, mons, size), size, dev.get("pen"), dev.get("finger")))
     os.replace(tmp, LUA)
     subprocess.run(["hyprctl", "reload"], capture_output=True, timeout=10)
+    if dev.get("finger") and previous_rotation != s["rotation"] and s["rotation"] != 180:
+        spawn_unlatch()
     return subprocess.run(["hyprctl", "configerrors"], capture_output=True, text=True, timeout=5).stdout.strip()
 
 
@@ -257,6 +301,8 @@ def setup(s):
     """Idempotent one-time install. tablet.lua is written before the require
     line goes in, so Hyprland never reloads into a missing module."""
     error = write(s)
+    if s["lastDevice"].get("finger") and s["rotation"] != 180:
+        spawn_unlatch()
     if not hyprland_wired():
         with open(HYPRLAND) as f:
             text = f.read()
@@ -349,6 +395,11 @@ def main():
     elif cmd == "setup":
         error = setup(s)
         s = load()
+    elif cmd == "unlatch":
+        finger = s["lastDevice"].get("finger")
+        if finger and s["rotation"] != 180:
+            unlatch(finger)
+        return
     elif cmd != "status":
         print(__doc__, file=sys.stderr)
         sys.exit(2)
