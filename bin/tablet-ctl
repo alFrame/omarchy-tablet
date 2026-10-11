@@ -7,6 +7,8 @@ Settings live in ~/.config/omarchy/tablet.json; every change regenerates
   tablet-ctl status                 -> JSON: settings, tablet, monitors, area
   tablet-ctl set '<json patch>'     -> merge patch, write, reload, print status
   tablet-ctl reset                  -> restore defaults
+  tablet-ctl toggle <key>           -> flip an on/off setting, e.g. fingerEnabled
+                                       (handy as a button command)
   tablet-ctl setup                  -> one-time install: tablet.lua, hyprland.lua
                                        require line, tablet-buttons user service
   tablet-ctl unlatch                -> (internal) clear libinput's pen/touch rotation
@@ -94,7 +96,7 @@ def sanitize(s):
         if not isinstance(spec, dict):
             continue
         action = spec.get("action", "none")
-        if action not in ACTIONS or (action == "default" and not key.startswith("pen")):
+        if action not in ACTIONS:
             action = "none"
         buttons[str(key)] = {"action": action, "value": str(spec.get("value", ""))[:200]}
     out["buttons"] = buttons
@@ -388,6 +390,20 @@ def main():
         s = sanitize(merge(s, patch))
         error = write(s)
         s = load()
+    elif cmd == "toggle":
+        key = sys.argv[2] if len(sys.argv) > 2 else ""
+        if not isinstance(DEFAULTS.get(key), bool):
+            print(f"tablet-ctl: {key!r} is not an on/off setting", file=sys.stderr)
+            sys.exit(2)
+        s = sanitize(merge(s, {key: not s[key]}))
+        error = write(s)
+        s = load()
+        if error:
+            print(error, file=sys.stderr)
+        elif key == "fingerEnabled":
+            subprocess.run(["notify-send", "-t", "1500", "Tablet",
+                            "Finger touch " + ("on" if s[key] else "off")])
+        return
     elif cmd == "reset":
         keep = {"slotCodes": s["slotCodes"], "lastDevice": s["lastDevice"]}
         s = sanitize({**DEFAULTS, **keep})

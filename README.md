@@ -19,12 +19,17 @@ and what every pen and tablet button does.
   click, natural scrolling.
 - **Buttons** – remap the pen side buttons and the ExpressKeys to a click, a
   keyboard shortcut (`ctrl+z`, `ctrl+shift+s`, `super+w`…), any shell command,
-  or nothing. The tablet is drawn from its real layout; press a physical
-  button and its picture and row light up. **Identify keys** relearns the key
-  order if a model's data is incomplete.
+  or nothing, or leave them on **App default** so drawing apps (Krita, Rnote…)
+  still get them. Presets cover the usual drawing shortcuts (undo, hold space
+  to pan, brush size, eraser, zoom) and commands (toggle finger touch,
+  screenshot, colour picker); **Test** runs a command on the spot. The tablet
+  is drawn from its real layout; press a physical button and its picture and
+  row light up. **Identify keys** relearns the key order if a model's data is
+  incomplete.
 - The panel adapts to the tablet that's plugged in: tabs and buttons it doesn't
-  have are hidden. Changes apply instantly and survive reboots. Colours and
-  fonts follow the current Omarchy theme.
+  have are hidden, and the bar icon disappears while no tablet is connected.
+  Changes apply instantly and survive reboots. Colours and fonts follow the
+  current Omarchy theme.
 
 ## Supported hardware
 
@@ -85,9 +90,12 @@ Updating from 0.1: button mappings are carried over automatically.
 | `Panel.qml` | The bar icon and panel. Every change is sent to `bin/tablet-ctl`. |
 | `bin/tabletlib.py` | Finds the tablet in `/proc/bus/input/devices` and reads its libwacom entry and layout. |
 | `bin/tablet-ctl` | Saves settings to `~/.config/omarchy/tablet.json`, generates `~/.config/hypr/tablet.lua`, reloads Hyprland. |
-| `bin/tablet-buttons` | User service. Grabs the ExpressKeys and runs their actions through a virtual keyboard and mouse. The pen is only grabbed while a side button is remapped; it is then replayed through a virtual clone (`… Pen Remap`), so pressure and tilt keep working. |
+| `bin/tablet-buttons` | User service. While any ExpressKey is remapped it grabs the pad and runs the actions through a virtual keyboard and mouse; keys left on App default are replayed through a virtual pad of the same name, so apps still see them. With every key on App default the pad isn't touched. The pen is only grabbed while a side button is remapped; it is then replayed through a virtual clone (`… Pen Remap`), so pressure and tilt keep working. |
 
 `tablet.lua` is generated: change settings from the panel, not by hand.
+
+`bin/tablet-ctl toggle fingerEnabled` flips finger touch on or off with a
+notification, so it can go on a tablet button or a Hyprland keybinding.
 
 ## Uninstall
 

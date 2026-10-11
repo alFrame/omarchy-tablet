@@ -4,8 +4,11 @@
 Runs as the tablet-buttons user service. Reads the "buttons" section of
 ~/.config/omarchy/tablet.json and re-reads it whenever the file changes.
 
-Pad: the ExpressKeys are grabbed and turned into clicks, shortcuts or
-commands. Keys are named by the evdev code they send (BTN_RIGHT, BTN_0, ...).
+Pad: left alone while every ExpressKey is on "default", so apps such as
+Krita see them as usual. Otherwise the pad is grabbed and its keys turned into
+clicks, shortcuts or commands; keys still on "default" are replayed through a
+virtual clone with the same name, which libinput again treats as a tablet pad.
+Keys are named by the evdev code they send (BTN_RIGHT, BTN_0, ...).
 
 Pen: left alone while every side button is on "default". Once one is
 remapped, the real pen is grabbed and replayed through a virtual clone
@@ -186,22 +189,55 @@ def open_device(path):
         return None
 
 
+def clone_of(dev, name):
+    caps = dev.capabilities(absinfo=True)
+    caps.pop(e.EV_SYN, None)
+    return evdev.UInput(caps, name=name, vendor=dev.info.vendor, product=dev.info.product,
+                        version=dev.info.version, bustype=dev.info.bustype,
+                        input_props=dev.input_props())
+
+
 async def run_pad(dev, buttons, out):
+    def action(name):
+        return buttons.get(name, {"action": "none"}).get("action", "none")
+
+    keys = [tabletlib.KEY_NAMES.get(c, f"KEY_{c}")
+            for c in dev.capabilities().get(e.EV_KEY, []) if not 0x140 <= c <= 0x14F]
+    if all(action(k) == "default" for k in keys):
+        # Nothing remapped: leave the pad to the apps, only report presses for the panel.
+        try:
+            async for ev in events(dev):
+                if ev.type == e.EV_KEY and ev.value in (0, 1) and not 0x140 <= ev.code <= 0x14F:
+                    mark(tabletlib.KEY_NAMES.get(ev.code, f"KEY_{ev.code}"), ev.value == 1)
+        finally:
+            dev.close()
+        return
+
+    # The clone keeps the pad's exact name: udev only tags a device as a tablet
+    # pad (ID_INPUT_TABLET_PAD) by name, and without that apps never see it.
+    clone = clone_of(dev, dev.name) if any(action(k) == "default" for k in keys) else None
     dev.grab()
     try:
         async for ev in events(dev):
-            if ev.type != e.EV_KEY or ev.value not in (0, 1) or 0x140 <= ev.code <= 0x14F:
-                continue
-            name = tabletlib.KEY_NAMES.get(ev.code, f"KEY_{ev.code}")
-            mark(name, ev.value == 1)
-            if ev.value == 1 and identifying():
-                continue
-            out.press(name, buttons.get(name, {"action": "none"}), ev.value == 1)
+            if ev.type == e.EV_KEY and not 0x140 <= ev.code <= 0x14F:
+                name = tabletlib.KEY_NAMES.get(ev.code, f"KEY_{ev.code}")
+                if ev.value in (0, 1):
+                    mark(name, ev.value == 1)
+                if ev.value == 1 and identifying():
+                    continue
+                if action(name) != "default":
+                    if ev.value in (0, 1):
+                        out.press(name, buttons.get(name, {"action": "none"}), ev.value == 1)
+                    continue
+            if clone:
+                clone.write_event(ev)
     finally:
         try:
             dev.ungrab()
         except OSError:
             pass
+        if clone:
+            clone.close()
         dev.close()
 
 
@@ -219,11 +255,7 @@ async def run_pen(dev, buttons, out):
             dev.close()
         return
 
-    caps = dev.capabilities(absinfo=True)
-    caps.pop(e.EV_SYN, None)
-    clone = evdev.UInput(caps, name=dev.name + tabletlib.REMAP_SUFFIX, vendor=dev.info.vendor,
-                         product=dev.info.product, version=dev.info.version,
-                         bustype=dev.info.bustype, input_props=dev.input_props())
+    clone = clone_of(dev, dev.name + tabletlib.REMAP_SUFFIX)
     dev.grab()
     try:
         async for ev in events(dev):

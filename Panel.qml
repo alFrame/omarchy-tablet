@@ -82,7 +82,33 @@ Panel {
     { value: "command", label: "Command" },
     { value: "none", label: "Disabled" }
   ]
-  readonly property var padActions: penActions.slice(1)
+  readonly property var padActions: penActions
+
+  // Ready-made values for the Shortcut and Command actions.
+  readonly property var keyPresets: [
+    { value: "", label: "Presets" },
+    { value: "ctrl+z", label: "Undo" },
+    { value: "ctrl+shift+z", label: "Redo" },
+    { value: "space", label: "Pan (hold)" },
+    { value: "e", label: "Eraser" },
+    { value: "b", label: "Brush" },
+    { value: "[", label: "Smaller brush" },
+    { value: "]", label: "Bigger brush" },
+    { value: "ctrl+plus", label: "Zoom in" },
+    { value: "ctrl+minus", label: "Zoom out" },
+    { value: "ctrl+0", label: "Reset zoom" },
+    { value: "ctrl+c", label: "Copy" },
+    { value: "ctrl+v", label: "Paste" },
+    { value: "ctrl+s", label: "Save" },
+    { value: "esc", label: "Escape" }
+  ]
+  readonly property var commandPresets: [
+    { value: "", label: "Presets" },
+    { value: root.helper + " toggle fingerEnabled", label: "Toggle finger touch" },
+    { value: "omarchy capture screenshot region", label: "Screenshot region" },
+    { value: "hyprpicker -a", label: "Pick a colour" },
+    { value: "omarchy-shell tablet open", label: "Open this panel" }
+  ]
 
   function s(key, fallback) {
     var v = settings_[key]
@@ -258,6 +284,7 @@ Panel {
   }
 
   Process { id: flagProc }
+  Process { id: testProc }
 
   Process {
     id: pressProc
@@ -278,6 +305,8 @@ Panel {
   // Plugging or unplugging the tablet is noticed on the next tick.
   Timer { interval: root.opened ? 3000 : 15000; running: true; repeat: true; onTriggered: root.refresh() }
 
+  // Hidden while no tablet is plugged in, unless setup still needs the panel.
+  visible: root.connected || !root.setupDone || !root.wacomDriver || !root.evdevOk
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
@@ -568,7 +597,7 @@ Panel {
           Text {
             width: parent.width
             text: root.buttonsService
-              ? "Press any pen or tablet button: its picture and row light up."
+              ? "Press any pen or tablet button: its picture and row light up. App default leaves a button to the app you're in (Krita, Rnote…)."
               : "The tablet-buttons service is not running, so mappings won't apply. Start it with: systemctl --user start tablet-buttons"
             color: root.buttonsService ? root.dim : Color.urgent
             font.family: root.uiFont
@@ -859,9 +888,17 @@ Panel {
         }
       }
 
-      TextField {
+      Item {
         visible: buttonRow.needsValue
         width: parent.width
+        implicitHeight: Math.max(valueField.implicitHeight, presetPicker.implicitHeight)
+
+      TextField {
+        id: valueField
+        anchors.left: parent.left
+        anchors.right: presetPicker.left
+        anchors.rightMargin: Style.space(6)
+        anchors.verticalCenter: parent.verticalCenter
         text: String(buttonRow.spec.value || "")
         placeholderText: buttonRow.spec.action === "key" ? "e.g. ctrl+z, ctrl+shift+s, super+w" : "e.g. omarchy launch browser"
         foreground: root.fg
@@ -870,6 +907,43 @@ Panel {
         onActiveFocusChanged: root.editing = activeFocus
         onEditingFinished: if (text !== String(buttonRow.spec.value || "")) root.setButton(buttonRow.key, { value: text })
         Keys.onEscapePressed: keyCatcher.forceActiveFocus()
+      }
+
+      Dropdown {
+        id: presetPicker
+        anchors.right: testButton.visible ? testButton.left : parent.right
+        anchors.rightMargin: testButton.visible ? Style.space(6) : 0
+        anchors.verticalCenter: parent.verticalCenter
+        width: Style.space(110)
+        showLabel: false
+        options: buttonRow.spec.action === "key" ? root.keyPresets : root.commandPresets
+        value: ""
+        foreground: root.fg
+        fontFamily: root.uiFont
+        onChanged: function(v) {
+          if (v !== "") root.setButton(buttonRow.key, { value: v })
+          Qt.callLater(function() { presetPicker.value = "" })
+        }
+      }
+
+      // Runs the command now, so it can be checked without reaching for the pen.
+      Button {
+        id: testButton
+        visible: buttonRow.spec.action === "command"
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        text: "Test"
+        iconText: "\uf04b"
+        bordered: true
+        enabled: String(buttonRow.spec.value || "").trim() !== ""
+        foreground: root.fg
+        fontFamily: root.uiFont
+        fontSize: Style.font.caption
+        onClicked: {
+          testProc.command = ["sh", "-c", String(buttonRow.spec.value)]
+          testProc.running = true
+        }
+      }
       }
     }
   }
