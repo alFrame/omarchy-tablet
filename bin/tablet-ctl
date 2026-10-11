@@ -1,10 +1,10 @@
 #!/usr/bin/python3
-"""Backend for the Tablet bar widget.
+"""Backend for the Wacom Bamboo bar widget.
 
 Settings live in ~/.config/omarchy/tablet.json; every change regenerates
 ~/.config/hypr/tablet.lua (required from hyprland.lua) and reloads Hyprland.
 
-  tablet-ctl status                 -> JSON: settings, devices, monitors, area
+  tablet-ctl status                 -> JSON: settings, tablet, monitors, area
   tablet-ctl set '<json patch>'     -> merge patch, write, reload, print status
   tablet-ctl reset                  -> restore defaults
   tablet-ctl setup                  -> one-time install: tablet.lua, hyprland.lua
@@ -15,6 +15,9 @@ import os
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import tabletlib  # noqa: E402
+
 HOME = os.path.expanduser("~")
 STATE = os.path.join(HOME, ".config/omarchy/tablet.json")
 LUA = os.path.join(HOME, ".config/hypr/tablet.lua")
@@ -23,16 +26,11 @@ REQUIRE = 'require("hypr.tablet")'
 SERVICE = os.path.join(HOME, ".config/systemd/user/tablet-buttons.service")
 PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
-PEN = "wacom-bamboopt-2fg-4x5-pen"
-# tablet-buttons replays the pen through this clone while a side button is remapped.
-PEN_REMAP = "wacom-bamboopt-2fg-4x5-pen-remap"
-FINGER = "wacom-bamboopt-2fg-4x5-finger"
-TABLET_MM = (147.2, 92.0)  # CTH-460 active surface
+FALLBACK_MM = [147.2, 92.0]
 
 DEFAULTS = {
     "output": "",             # monitor name, "" = every monitor
-    "rotation": 0,            # degrees: 0 / 90 / 180 / 270
-    "leftHanded": False,
+    "rotation": 0,            # 0 / 90 / 180 (flipped, left-handed) / 270
     "areaPercent": 100,       # share of the surface used, centred
     "matchAspect": True,      # crop the area to the monitor's aspect ratio
     "pressure": 0,            # 0..100, higher = lighter touch reaches full
@@ -40,19 +38,13 @@ DEFAULTS = {
     "fingerSpeed": 0.0,       # -1..1
     "naturalScroll": True,
     "tapToClick": True,
-    "buttons": {
-        "pen1": {"action": "default", "value": ""},
-        "pen2": {"action": "default", "value": ""},
-        "pad1": {"action": "key", "value": "ctrl+z"},
-        "pad2": {"action": "key", "value": "ctrl+shift+z"},
-        "pad3": {"action": "right", "value": ""},
-        "pad4": {"action": "middle", "value": ""},
-    },
-    # Pad keys as they sit on the tablet, top to bottom (set by "Identify keys").
-    "padOrder": ["pad1", "pad2", "pad3", "pad4"],
+    "buttons": {},            # "pen1".."pen3" and pad key codes ("BTN_RIGHT") -> {action, value}
+    "slotCodes": {},          # "vendor:product" -> {layout letter: code}, from Identify keys
+    "lastDevice": {},         # names and size of the last tablet seen, for writing while unplugged
 }
-PAD_KEYS = ["pad1", "pad2", "pad3", "pad4"]
-ACTIONS = {"default", "left", "right", "middle", "key", "command", "none"}
+ACTIONS = tabletlib.ACTIONS
+# 0.1 keyed the CTH-460's keys pad1..pad4 by the code the kernel sends.
+LEGACY_PAD = {"pad1": "BTN_LEFT", "pad2": "BTN_FORWARD", "pad3": "BTN_BACK", "pad4": "BTN_RIGHT"}
 
 
 def hypr_json(*args):
@@ -63,13 +55,22 @@ def hypr_json(*args):
         return None
 
 
+def migrate(data):
+    buttons = data.get("buttons") or {}
+    if any(k in buttons for k in LEGACY_PAD):
+        data["buttons"] = {LEGACY_PAD.get(k, k): v for k, v in buttons.items()}
+    data.pop("padOrder", None)
+    data.pop("leftHanded", None)
+    return data
+
+
 def load():
     data = dict(DEFAULTS)
     try:
         with open(STATE) as f:
-            saved = json.load(f)
+            saved = migrate(json.load(f))
         data.update({k: v for k, v in saved.items() if k in DEFAULTS})
-    except (OSError, ValueError):
+    except (OSError, ValueError, AttributeError):
         pass
     return sanitize(data)
 
@@ -78,7 +79,6 @@ def sanitize(s):
     out = dict(DEFAULTS)
     out["output"] = str(s.get("output", ""))
     out["rotation"] = int(s.get("rotation", 0)) % 360 // 90 * 90
-    out["leftHanded"] = bool(s.get("leftHanded"))
     out["areaPercent"] = max(30, min(100, int(round(float(s.get("areaPercent", 100))))))
     out["matchAspect"] = bool(s.get("matchAspect"))
     out["pressure"] = max(0, min(100, int(round(float(s.get("pressure", 0))))))
@@ -87,16 +87,27 @@ def sanitize(s):
     out["naturalScroll"] = bool(s.get("naturalScroll"))
     out["tapToClick"] = bool(s.get("tapToClick"))
     buttons = {}
-    for key, fallback in DEFAULTS["buttons"].items():
-        spec = (s.get("buttons") or {}).get(key) or fallback
-        action = spec.get("action", fallback["action"])
+    for key, spec in (s.get("buttons") or {}).items():
+        if not isinstance(spec, dict):
+            continue
+        action = spec.get("action", "none")
         if action not in ACTIONS or (action == "default" and not key.startswith("pen")):
-            action = fallback["action"]
-        buttons[key] = {"action": action, "value": str(spec.get("value", ""))[:200]}
+            action = "none"
+        buttons[str(key)] = {"action": action, "value": str(spec.get("value", ""))[:200]}
     out["buttons"] = buttons
-    order = [str(k) for k in (s.get("padOrder") or [])]
-    out["padOrder"] = order if sorted(order) == PAD_KEYS else list(PAD_KEYS)
+    out["slotCodes"] = {str(k): {str(l): str(c) for l, c in v.items()}
+                        for k, v in (s.get("slotCodes") or {}).items() if isinstance(v, dict)}
+    out["lastDevice"] = dict(s.get("lastDevice") or {})
     return out
+
+
+def current_tablet(s):
+    """(detected tablet, its description at the current rotation) or (None, None)."""
+    tablet = tabletlib.detect()
+    if not tablet:
+        return None, None
+    key = f'{tablet["vendor"]}:{tablet["product"]}'
+    return tablet, tabletlib.describe(tablet, s["rotation"], s["slotCodes"].get(key))
 
 
 def monitors():
@@ -129,8 +140,9 @@ def target_aspect(s, mons):
     return aspect
 
 
-def area(s, mons):
-    w, h = TABLET_MM
+def area(s, mons, size):
+    full_w, full_h = size
+    w, h = full_w, full_h
     aspect = target_aspect(s, mons) if s["matchAspect"] else None
     if aspect:
         if w / h > aspect:
@@ -139,8 +151,8 @@ def area(s, mons):
             h = w / aspect
     k = s["areaPercent"] / 100
     w, h = w * k, h * k
-    x = (TABLET_MM[0] - w) / 2
-    y = (TABLET_MM[1] - h) / 2
+    x = (full_w - w) / 2
+    y = (full_h - h) / 2
     return {"w": round(w, 1), "h": round(h, 1), "x": round(x, 1), "y": round(y, 1)}
 
 
@@ -148,27 +160,29 @@ def lua_bool(v):
     return "true" if v else "false"
 
 
-def render(s, a):
-    transform = {0: 0, 90: 1, 180: 2, 270: 3}[s["rotation"]]
-    full = a["w"] >= TABLET_MM[0] - 0.05 and a["h"] >= TABLET_MM[1] - 0.05
+def render(s, a, size, pen, finger):
+    # Flipping uses libinput's left-handed mode: it turns the pen and, on Wacom
+    # tablets, the paired touch surface by 180°. Quarter turns can only be done
+    # with Hyprland's transform, which moves the pen alone.
+    transform = {0: 0, 90: 1, 180: 0, 270: 3}[s["rotation"]]
+    flipped = s["rotation"] == 180
+    full = a["w"] >= size[0] - 0.05 and a["h"] >= size[1] - 0.05
     area_lines = "" if full else (
         f'    active_area_size = "{a["w"]} {a["h"]}",\n'
         f'    active_area_position = "{a["x"]} {a["y"]}",\n'
     )
     pressure_max = round(1.0 - s["pressure"] / 100 * 0.6, 3)
-    pen_blocks = "\n".join(f"""hl.device({{
+    blocks = []
+    if pen:
+        for name in (pen, pen + "-remap"):  # tablet-buttons' clone while a pen button is remapped
+            blocks.append(f"""hl.device({{
     name = "{name}",
     output = "{s["output"]}",
     transform = {transform},
-    left_handed = {lua_bool(s["leftHanded"])},
+    left_handed = {lua_bool(flipped)},
 {area_lines}}})
-""" for name in (PEN, PEN_REMAP))
-    return f"""-- Wacom Bamboo Pen & Touch (CTH-460).
--- GENERATED by the Tablet bar widget (~/.config/omarchy/tablet.json).
--- Change settings from the bar; manual edits here are overwritten.
-
-{pen_blocks}
-hl.config({{
+""")
+        blocks.append(f"""hl.config({{
     input = {{
         tablettool = {{
             pressure_range_min = 0.0,
@@ -176,18 +190,39 @@ hl.config({{
         }},
     }},
 }})
-
-hl.device({{
-    name = "{FINGER}",
+""")
+    if finger:
+        blocks.append(f"""hl.device({{
+    name = "{finger}",
     enabled = {lua_bool(s["fingerEnabled"])},
+    left_handed = {lua_bool(flipped)},
     sensitivity = {s["fingerSpeed"]},
     natural_scroll = {lua_bool(s["naturalScroll"])},
     tap_to_click = {lua_bool(s["tapToClick"])},
 }})
-"""
+""")
+    if not blocks:
+        blocks.append("-- No tablet seen yet; plug it in and open the bar widget.\n")
+    return ("-- Wacom tablet settings.\n"
+            "-- GENERATED by the Wacom Bamboo bar widget (~/.config/omarchy/tablet.json).\n"
+            "-- Change settings from the bar; manual edits here are overwritten.\n\n"
+            + "\n".join(blocks))
+
+
+def remember(s, desc):
+    """Keep the tablet's names and size so tablet.lua can be written while it's unplugged."""
+    if desc:
+        s["lastDevice"] = {"pen": desc["penName"], "finger": desc["fingerName"],
+                           "sizeMm": desc["sizeMm"] or s["lastDevice"].get("sizeMm") or FALLBACK_MM,
+                           "model": desc["modelName"]}
+    return s
 
 
 def write(s):
+    tablet, desc = current_tablet(s)
+    s = remember(s, desc)
+    dev = s["lastDevice"]
+    size = dev.get("sizeMm") or FALLBACK_MM
     mons = monitors()
     os.makedirs(os.path.dirname(STATE), exist_ok=True)
     tmp = STATE + ".tmp"
@@ -196,11 +231,10 @@ def write(s):
     os.replace(tmp, STATE)
     tmp = LUA + ".tmp"
     with open(tmp, "w") as f:
-        f.write(render(s, area(s, mons)))
+        f.write(render(s, area(s, mons, size), size, dev.get("pen"), dev.get("finger")))
     os.replace(tmp, LUA)
     subprocess.run(["hyprctl", "reload"], capture_output=True, timeout=10)
-    errors = subprocess.run(["hyprctl", "configerrors"], capture_output=True, text=True, timeout=5).stdout.strip()
-    return errors
+    return subprocess.run(["hyprctl", "configerrors"], capture_output=True, text=True, timeout=5).stdout.strip()
 
 
 def hyprland_wired():
@@ -230,14 +264,14 @@ def setup(s):
         if anchor in text:
             text = text.replace(anchor, anchor + REQUIRE + "\n", 1)
         else:
-            text = text.rstrip("\n") + "\n\n-- Wacom tablet settings (Tablet bar widget)\n" + REQUIRE + "\n"
+            text = text.rstrip("\n") + "\n\n-- Wacom tablet settings (Wacom Bamboo bar widget)\n" + REQUIRE + "\n"
         with open(HYPRLAND, "w") as f:
             f.write(text)
         subprocess.run(["hyprctl", "reload"], capture_output=True, timeout=10)
     os.makedirs(os.path.dirname(SERVICE), exist_ok=True)
     with open(SERVICE, "w") as f:
         f.write(f"""[Unit]
-Description=Wacom tablet button remapper (Omarchy Tablet widget)
+Description=Wacom tablet button remapper (Omarchy Wacom Bamboo widget)
 PartOf=graphical-session.target
 After=graphical-session.target
 
@@ -257,22 +291,46 @@ WantedBy=graphical-session.target
 
 def status(s, error=""):
     mons = monitors()
+    tablet, desc = current_tablet(s)
+    size = (desc and desc["sizeMm"]) or s["lastDevice"].get("sizeMm") or FALLBACK_MM
     devices = hypr_json("devices") or {}
-    tablets = [t.get("name") for t in devices.get("tablets", [])]
-    mice = [m.get("name") for m in devices.get("mice", [])]
+    tablet_names = {t.get("name") for t in devices.get("tablets", [])}
+    if desc:
+        default_desc = desc if s["rotation"] == 0 else tabletlib.describe(
+            tablet, 0, s["slotCodes"].get(f'{desc["vendor"]}:{desc["product"]}'))
+        s = dict(s, buttons=tabletlib.resolve_buttons(s["buttons"], default_desc))
     return {
         "settings": s,
-        "pen": PEN in tablets or PEN_REMAP in tablets,
+        "tablet": desc,
+        "pen": bool(desc and desc["hasPen"]) and (desc["penName"] in tablet_names or desc["penName"] + "-remap" in tablet_names),
+        "finger": bool(desc and desc["hasTouch"]),
         "buttonsService": service_active(),
         "setupDone": hyprland_wired() and os.path.exists(LUA) and os.path.exists(SERVICE),
         "evdev": evdev_available(),
         "wacomDriver": os.path.isdir("/sys/module/wacom"),
-        "finger": FINGER in mice,
         "monitors": [{"name": m["name"], "description": m["description"]} for m in mons],
-        "area": area(s, mons),
-        "tabletMm": {"w": TABLET_MM[0], "h": TABLET_MM[1]},
+        "area": area(s, mons, size),
+        "tabletMm": {"w": size[0], "h": size[1]},
         "error": error,
     }
+
+
+def merge(s, patch):
+    out = dict(s)
+    for key, value in patch.items():
+        if key == "buttons":
+            merged = {k: dict(v) for k, v in s.get("buttons", {}).items()}
+            for bkey, spec in value.items():
+                merged[bkey] = {**merged.get(bkey, {}), **spec}
+            out["buttons"] = merged
+        elif key == "slotCodes":
+            # The panel sends the learnt order for the connected tablet only.
+            tablet = tabletlib.detect()
+            if tablet:
+                out["slotCodes"] = {**s.get("slotCodes", {}), f'{tablet["vendor"]}:{tablet["product"]}': value}
+        else:
+            out[key] = value
+    return out
 
 
 def main():
@@ -281,18 +339,16 @@ def main():
     error = ""
     if cmd == "set":
         patch = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
-        if "buttons" in patch:
-            merged = {k: dict(v) for k, v in s.get("buttons", {}).items()}
-            for key, spec in patch["buttons"].items():
-                merged[key] = {**merged.get(key, {}), **spec}
-            patch["buttons"] = merged
-        s = sanitize({**s, **patch})
+        s = sanitize(merge(s, patch))
         error = write(s)
+        s = load()
     elif cmd == "reset":
-        s = dict(DEFAULTS)
+        keep = {"slotCodes": s["slotCodes"], "lastDevice": s["lastDevice"]}
+        s = sanitize({**DEFAULTS, **keep})
         error = write(s)
     elif cmd == "setup":
         error = setup(s)
+        s = load()
     elif cmd != "status":
         print(__doc__, file=sys.stderr)
         sys.exit(2)

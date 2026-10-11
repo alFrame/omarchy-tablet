@@ -4,7 +4,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
-// Wacom Bamboo Pen & Touch settings. Every control sends a patch to
+// Wacom tablet settings. Every control sends a patch to
 // bin/tablet-ctl, which rewrites ~/.config/hypr/tablet.lua and reloads
 // Hyprland, so changes take effect immediately and survive a reboot.
 // Button mappings are picked up by the tablet-buttons user service
@@ -29,11 +29,41 @@ Panel {
   property string tab: "pen"
   property bool editing: false
   property string flashButton: ""
+  // What bin/tablet-ctl found: model, capabilities, pen buttons and pad key
+  // slots (layout geometry + evdev code, ordered as the tablet is held).
+  property var tablet: null
 
   readonly property color fg: root.bar ? root.bar.foreground : Color.foreground
   readonly property color dim: Qt.darker(fg, 1.4)
   readonly property string uiFont: root.bar ? root.bar.fontFamily : Style.font.family
-  readonly property bool connected: penPresent || fingerPresent
+  readonly property bool connected: tablet !== null
+  readonly property bool hasPen: tablet ? tablet.hasPen : true
+  readonly property bool hasTouch: tablet ? tablet.hasTouch : false
+  readonly property var penButtons: tablet ? tablet.penButtons : []
+  readonly property var slots: tablet ? tablet.slots : []
+  readonly property int rotation_: s("rotation", 0)
+  readonly property string modelTitle: tablet ? String(tablet.modelName).replace(/^Wacom /, "") : "Tablet"
+
+  function tabOptions() {
+    var opts = []
+    if (hasPen) opts.push({ value: "pen", label: "Pen", icon: "\uf040" })
+    if (hasTouch) opts.push({ value: "touch", label: "Touch", icon: "\uf25a" })
+    if (penButtons.length > 0 || slots.length > 0) opts.push({ value: "buttons", label: "Buttons", icon: "\uf11c" })
+    return opts
+  }
+
+  // Keep the selected tab valid when a tablet with fewer features is plugged in.
+  onTabletChanged: {
+    var opts = tabOptions()
+    for (var i = 0; i < opts.length; i++) if (opts[i].value === tab) return
+    if (opts.length > 0) tab = opts[0].value
+  }
+
+  readonly property var penButtonInfo: ({
+    pen1: { label: "Lower button", hint: "nearest the tip" },
+    pen2: { label: "Upper button", hint: "further from the tip" },
+    pen3: { label: "Third button", hint: "furthest from the tip" }
+  })
   readonly property string home: Quickshell.env("HOME")
 
   readonly property string pluginDir: {
@@ -90,6 +120,7 @@ Panel {
     evdevOk = data.evdev !== false
     wacomDriver = data.wacomDriver !== false
     error = data.error || ""
+    tablet = data.tablet || null
   }
 
   function refresh() {
@@ -97,10 +128,14 @@ Panel {
     statusProc.running = true
   }
 
-  function mergePatch(base, patch) {
+  // `local` merges into the panel's copy of the settings; slotCodes is only
+  // meaningful to the helper, which stores it per tablet model.
+  function mergePatch(base, patch, local) {
     var out = Object.assign({}, base || {})
     for (var k in patch) {
-      if (k === "buttons") {
+      if (k === "slotCodes" && local) {
+        continue
+      } else if (k === "buttons") {
         var b = Object.assign({}, out.buttons || {})
         for (var bk in patch.buttons) b[bk] = Object.assign({}, b[bk] || {}, patch.buttons[bk])
         out.buttons = b
@@ -114,8 +149,8 @@ Panel {
   // Optimistic update, then hand the patch to the helper. Patches that
   // arrive while one is being written are merged and sent as one.
   function send(patch) {
-    settings_ = mergePatch(settings_, patch)
-    pendingPatch = mergePatch(pendingPatch, patch)
+    settings_ = mergePatch(settings_, patch, true)
+    pendingPatch = mergePatch(pendingPatch, patch, false)
     if (!setProc.running) flush()
   }
 
@@ -185,23 +220,27 @@ Panel {
     var name = line.split(" ")[0]
     flashButton = name
     flashTimer.restart()
-    if (identifying && name.indexOf("pad") === 0 && identifyOrder.indexOf(name) < 0) {
+    if (identifying && slotIndexOf(name) >= 0 && identifyOrder.indexOf(name) < 0) {
       var next = identifyOrder.concat([name])
       identifyOrder = next
-      if (next.length === 4) {
-        set("padOrder", next)
+      if (next.length === slots.length) {
+        // The i-th key pressed sits at the i-th position as the tablet is held.
+        var map = {}
+        for (var i = 0; i < slots.length; i++) map[slots[i].letter] = next[i]
+        set("slotCodes", map)
         stopIdentify()
+        refresh()
       }
     }
   }
 
-  // ---- "Identify keys": press the four keys top to bottom to learn their order.
-  readonly property var positionNames: ["Top key", "Second key", "Third key", "Bottom key"]
+  // ---- "Identify keys": press the pad keys in order to learn which is which.
   property bool identifying: false
   property var identifyOrder: []
-  readonly property var padOrder: {
-    var o = settings_.padOrder
-    return (o && o.length === 4) ? o : ["pad1", "pad2", "pad3", "pad4"]
+
+  function slotIndexOf(code) {
+    for (var i = 0; i < slots.length; i++) if (slots[i].code === code) return i
+    return -1
   }
 
   function startIdentify() {
@@ -216,12 +255,6 @@ Panel {
     flagProc.running = false
     flagProc.command = ["rm", "-f", root.home + "/.cache/omarchy-tablet/identify"]
     flagProc.running = true
-  }
-
-  // Position (0 = top) of a pad key; while identifying, keys not pressed yet have none.
-  function padPosition(key) {
-    if (identifying) return identifyOrder.indexOf(key)
-    return padOrder.indexOf(key)
   }
 
   Process { id: flagProc }
@@ -293,9 +326,13 @@ Panel {
         PanelHero {
           foreground: root.fg
           fontFamily: root.uiFont
-          title: "Tablet"
-          meta: root.connected ? "Bamboo CTH-460 · connected" : "Not connected"
-          detail: root.penPresent ? "PEN" + (root.fingerPresent ? " + TOUCH" : "") : ""
+          title: root.modelTitle
+          meta: root.connected
+            ? ((root.tablet.model ? root.tablet.model + " · " : "") + "connected")
+            : "No Wacom tablet connected"
+          detail: root.connected
+            ? [root.hasPen ? "PEN" : "", root.hasTouch ? "TOUCH" : ""].filter(function(x) { return x }).join(" + ")
+            : ""
           iconOpacity: root.connected ? 1 : 0.45
           iconComponent: Text {
             textFormat: Text.PlainText
@@ -353,11 +390,8 @@ Panel {
           width: parent.width
           spacing: Style.space(6)
           focusable: false
-          options: [
-            { value: "pen", label: "Pen", icon: "" },
-            { value: "touch", label: "Touch", icon: "" },
-            { value: "buttons", label: "Buttons", icon: "" }
-          ]
+          visible: root.tabOptions().length > 1
+          options: root.tabOptions()
           value: root.tab
           foreground: root.fg
           fontFamily: root.uiFont
@@ -369,7 +403,7 @@ Panel {
 
         // ================= Pen =================
         Column {
-          visible: root.tab === "pen"
+          visible: root.tab === "pen" && root.hasPen
           width: parent.width
           spacing: Style.space(14)
 
@@ -386,22 +420,35 @@ Panel {
             onChanged: function(v) { root.set("output", v) }
           }
 
-          Header { text: "ROTATION" }
+          Header { text: "ORIENTATION" }
           ButtonGroup {
             width: parent.width
             spacing: Style.space(6)
             focusable: false
             options: [
-              { value: "0", label: "0°", tooltip: "Normal" },
-              { value: "90", label: "90°" },
-              { value: "180", label: "180°", tooltip: "Upside down (left-handed)" },
-              { value: "270", label: "270°" }
+              { value: "0", label: "Normal" },
+              { value: "180", label: "Flipped", tooltip: "Turned 180° for left-handed use" },
+              { value: "90", label: "90°", tooltip: "Portrait; touch doesn't follow" },
+              { value: "270", label: "270°", tooltip: "Portrait; touch doesn't follow" }
             ]
             value: String(root.s("rotation", 0))
             foreground: root.fg
             fontFamily: root.uiFont
             fontSize: Style.font.bodySmall
             onChanged: function(v) { root.set("rotation", parseInt(v)) }
+          }
+
+          Text {
+            width: parent.width
+            text: root.rotation_ === 180
+              ? "Flipped for left-handed use: pen" + (root.hasTouch ? ", touch" : "") + " and the key order all turn around."
+              : root.rotation_ === 0
+                ? "Left-handed? Turn the tablet around and pick Flipped."
+                : "Portrait: the pen turns" + (root.hasTouch ? "; finger touch keeps its normal direction." : ".")
+            color: root.dim
+            font.family: root.uiFont
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
           }
 
           SliderRow {
@@ -469,7 +516,7 @@ Panel {
 
         // ================= Touch =================
         Column {
-          visible: root.tab === "touch"
+          visible: root.tab === "touch" && root.hasTouch
           width: parent.width
           spacing: Style.space(14)
 
@@ -529,14 +576,23 @@ Panel {
             wrapMode: Text.WordWrap
           }
 
-          Header { text: "PEN SIDE BUTTONS" }
-          PenDiagram { width: parent.width }
-          ButtonRow { key: "pen1"; label: "Lower button"; hint: "near the tip"; options: root.penActions }
-          ButtonRow { key: "pen2"; label: "Upper button"; hint: "further from the tip"; options: root.penActions }
+          Header { visible: root.penButtons.length > 0; text: "PEN SIDE BUTTONS" }
+          PenDiagram { visible: root.penButtons.length > 0; width: parent.width }
+          Repeater {
+            model: root.penButtons
+            ButtonRow {
+              required property var modelData
+              key: modelData
+              label: (root.penButtonInfo[modelData] || { label: modelData }).label
+              hint: (root.penButtonInfo[modelData] || { hint: "" }).hint
+              options: root.penActions
+            }
+          }
 
-          PanelSeparator { foreground: root.fg }
+          PanelSeparator { visible: root.penButtons.length > 0 && root.slots.length > 0; foreground: root.fg }
 
           Item {
+            visible: root.slots.length > 0
             width: parent.width
             implicitHeight: identifyButton.implicitHeight
 
@@ -560,15 +616,18 @@ Panel {
             }
           }
 
-          TabletDiagram { width: parent.width }
+          TabletDiagram { visible: root.slots.length > 0; width: parent.width }
 
           Text {
+            visible: root.slots.length > 0
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
-            text: root.identifying
-              ? "Press the " + root.positionNames[root.identifyOrder.length].toUpperCase()
-                + " on the tablet  (" + (root.identifyOrder.length + 1) + "/4)\nKey actions are paused until you finish."
-              : "Hold the tablet with its keys on the left. Wrong order? Use Identify keys."
+            text: root.identifying && root.identifyOrder.length < root.slots.length
+              ? "Press the " + root.slots[root.identifyOrder.length].label.toUpperCase()
+                + " on the tablet  (" + (root.identifyOrder.length + 1) + "/" + root.slots.length + ")\nKey actions are paused until you finish."
+              : root.tablet && !root.tablet.orderKnown
+                ? "This model's key order is a guess. Press Identify keys and tap each key in the order shown."
+                : "Drawn as you hold the tablet" + (root.rotation_ === 180 ? " (flipped)" : "") + ". Wrong order? Use Identify keys."
             color: root.identifying ? root.fg : root.dim
             font.family: root.uiFont
             font.pixelSize: Style.font.caption
@@ -577,12 +636,11 @@ Panel {
           }
 
           Repeater {
-            model: root.padOrder
+            model: root.slots
             ButtonRow {
               required property var modelData
-              required property int index
-              key: modelData
-              label: root.positionNames[index]
+              key: modelData.code
+              label: modelData.label
               options: root.padActions
             }
           }
@@ -863,7 +921,7 @@ Panel {
       }
 
       Repeater {
-        model: [{ key: "pen1", x: 0.16 }, { key: "pen2", x: 0.40 }]
+        model: root.penButtons.map(function(k, i) { return { key: k, x: 0.16 + i * 0.24 } })
         Rectangle {
           required property var modelData
           readonly property bool lit: root.flashButton === modelData.key
@@ -881,7 +939,9 @@ Panel {
     }
 
     Repeater {
-      model: [{ key: "pen1", x: 0.16, label: "Lower" }, { key: "pen2", x: 0.40, label: "Upper" }]
+      model: root.penButtons.map(function(k, i) {
+        return { key: k, x: 0.16 + i * 0.24, label: ["Lower", "Upper", "Third"][i] || k }
+      })
       Text {
         required property var modelData
         textFormat: Text.PlainText
@@ -906,61 +966,100 @@ Panel {
     }
   }
 
-  // Tablet seen from above, ExpressKeys down the left edge around the LED.
-  // Key numbers are positions (1 = top); a key lights up when pressed and the
-  // one "Identify keys" is waiting for is outlined in the accent colour.
+  // Tablet seen from above, drawn from libwacom's layout for the model and
+  // turned to match the chosen orientation. Key numbers are positions as the
+  // tablet is held (1 = top/leftmost); a key lights up when pressed and the one
+  // "Identify keys" is waiting for is outlined in the accent colour.
   component TabletDiagram: Item {
     id: tabletDiagram
-    implicitHeight: body.height + Style.space(4)
 
-    Rectangle {
-      id: body
-      width: Math.min(tabletDiagram.width, Style.space(250))
-      height: width * 0.56
-      anchors.horizontalCenter: parent.horizontalCenter
-      radius: Style.space(12)
-      color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.05)
-      border.width: 1
-      border.color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.55)
+    readonly property real cw: root.tablet && root.tablet.canvas ? root.tablet.canvas[0] : 240
+    readonly property real ch: root.tablet && root.tablet.canvas ? root.tablet.canvas[1] : 160
+    readonly property bool quarter: root.rotation_ === 90 || root.rotation_ === 270
+    // Size of the drawing once turned.
+    readonly property real shownW: quarter ? ch : cw
+    readonly property real shownH: quarter ? cw : ch
+    readonly property real k: Math.min(width / shownW, Style.space(150) / shownH)
 
-      readonly property real keyW: width * 0.10
-      readonly property real keyH: height * 0.14
-      readonly property real keyGap: height * 0.04
-      readonly property real ledGap: height * 0.12
-      readonly property real stackH: keyH * 4 + keyGap * 2 + ledGap * 2
-      readonly property real stackTop: (height - stackH) / 2
+    implicitHeight: shownH * k + Style.space(4)
 
-      function keyY(p) {
-        var y = stackTop + p * keyH
-        if (p >= 1) y += keyGap
-        if (p >= 2) y += ledGap * 2
-        if (p >= 3) y += keyGap
-        return y
+    // Bounding box of the keys, to place the drawing area beside them.
+    readonly property var keyBox: {
+      var sl = root.slots
+      if (!sl.length) return { x: 0, y: 0, w: 0, h: 0 }
+      var x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9
+      for (var i = 0; i < sl.length; i++) {
+        x0 = Math.min(x0, sl[i].x); y0 = Math.min(y0, sl[i].y)
+        x1 = Math.max(x1, sl[i].x + sl[i].w); y1 = Math.max(y1, sl[i].y + sl[i].h)
+      }
+      return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
+    }
+    readonly property var drawArea: {
+      var b = keyBox, m = 0.06
+      if (b.h >= b.w) {  // a column of keys: surface on the far side
+        var left = b.x + b.w / 2 < cw / 2
+        var x0 = left ? b.x + b.w + cw * m : cw * m
+        var x1 = left ? cw * (1 - m) : b.x - cw * m
+        return { x: x0, y: ch * 0.1, w: x1 - x0, h: ch * 0.8 }
+      }
+      var top = b.y + b.h / 2 < ch / 2  // a row of keys
+      var y0 = top ? b.y + b.h + ch * m : ch * 0.1
+      var y1 = top ? ch * 0.9 : b.y - ch * m
+      return { x: cw * 0.08, y: y0, w: cw * 0.84, h: y1 - y0 }
+    }
+
+    Item {
+      id: drawing
+      width: tabletDiagram.cw * tabletDiagram.k
+      height: tabletDiagram.ch * tabletDiagram.k
+      anchors.centerIn: parent
+      rotation: root.rotation_
+      Behavior on rotation { RotationAnimation { duration: 260; easing.type: Easing.OutCubic; direction: RotationAnimation.Shortest } }
+
+      Rectangle {
+        anchors.fill: parent
+        radius: Style.space(12)
+        color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.05)
+        border.width: 1
+        border.color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.55)
       }
 
-      // Status LED between the two key pairs.
+      // Drawing surface.
       Rectangle {
-        width: body.keyW * 0.3
-        height: width
-        radius: width / 2
-        x: body.width * 0.06 + (body.keyW - width) / 2
-        y: body.keyY(2) - body.ledGap - height / 2
-        color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.4)
+        visible: tabletDiagram.drawArea.w > 0 && tabletDiagram.drawArea.h > 0
+        x: tabletDiagram.drawArea.x * tabletDiagram.k
+        y: tabletDiagram.drawArea.y * tabletDiagram.k
+        width: Math.max(0, tabletDiagram.drawArea.w * tabletDiagram.k)
+        height: Math.max(0, tabletDiagram.drawArea.h * tabletDiagram.k)
+        radius: Style.space(6)
+        color: "transparent"
+        border.width: 1
+        border.color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.25)
+
+        Text {
+          anchors.centerIn: parent
+          rotation: -root.rotation_
+          textFormat: Text.PlainText
+          text: "drawing area"
+          color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.35)
+          font.family: root.uiFont
+          font.pixelSize: Style.font.caption
+        }
       }
 
       Repeater {
-        model: 4
+        model: root.slots
         Rectangle {
-          required property int index
-          readonly property string code: root.identifying ? (root.identifyOrder[index] || "") : root.padOrder[index]
+          required property var modelData
+          readonly property string code: root.identifying ? (root.identifyOrder[modelData.index] || "") : modelData.code
           readonly property bool lit: code !== "" && root.flashButton === code
-          readonly property bool waiting: root.identifying && index === root.identifyOrder.length
-          readonly property bool done: root.identifying && index < root.identifyOrder.length
+          readonly property bool waiting: root.identifying && modelData.index === root.identifyOrder.length
+          readonly property bool done: root.identifying && modelData.index < root.identifyOrder.length
 
-          x: body.width * 0.06
-          y: body.keyY(index)
-          width: body.keyW
-          height: body.keyH
+          x: modelData.x * tabletDiagram.k
+          y: modelData.y * tabletDiagram.k
+          width: Math.max(Style.space(12), modelData.w * tabletDiagram.k)
+          height: Math.max(Style.space(12), modelData.h * tabletDiagram.k)
           radius: Style.space(4)
           color: lit ? root.fg : (done ? Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.3) : Color.background)
           border.width: waiting ? 2 : 1
@@ -977,34 +1076,14 @@ Panel {
 
           Text {
             anchors.centerIn: parent
+            rotation: -root.rotation_
             textFormat: Text.PlainText
-            text: String(index + 1)
+            text: String(modelData.index + 1)
             color: parent.lit ? Color.background : root.fg
             font.family: root.uiFont
-            font.pixelSize: Math.max(8, parent.height * 0.62)
+            font.pixelSize: Math.max(8, Math.min(parent.width, parent.height) * 0.62)
             font.bold: true
           }
-        }
-      }
-
-      // Drawing surface.
-      Rectangle {
-        x: body.width * 0.24
-        y: body.height * 0.12
-        width: body.width * 0.70
-        height: body.height * 0.76
-        radius: Style.space(6)
-        color: "transparent"
-        border.width: 1
-        border.color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.25)
-
-        Text {
-          anchors.centerIn: parent
-          textFormat: Text.PlainText
-          text: "drawing area"
-          color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.35)
-          font.family: root.uiFont
-          font.pixelSize: Style.font.caption
         }
       }
     }

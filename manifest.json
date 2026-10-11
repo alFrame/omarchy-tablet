@@ -2,11 +2,11 @@
   "schemaVersion": 1,
   "id": "io.github.mug31.wacom-bamboo",
   "name": "Wacom Bamboo",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "homepage": "https://github.com/mug31/omarchy-tablet",
   "author": "mug31",
   "license": "MIT",
-  "description": "Wacom Bamboo (CTH-460) settings from the bar: target display, rotation, active area, pressure, finger touch, and pen/ExpressKey button remapping.",
+  "description": "Wacom tablet settings from the bar: target display, flipped/left-handed orientation, active area, pressure, finger touch, and pen/ExpressKey remapping. Adapts to Bamboo, Intuos and One by Wacom models via libwacom.",
   "kinds": [
     "bar-widget"
   ],
@@ -15,7 +15,7 @@
   },
   "barWidget": {
     "displayName": "Wacom Bamboo",
-    "description": "Tweak the Wacom pen and finger touch from the bar.",
+    "description": "Tweak a Wacom pen tablet, its touch and its buttons from the bar.",
     "category": "System",
     "defaultSection": "right",
     "allowMultiple": false
