@@ -22,10 +22,19 @@ import glob
 import json
 import os
 import sys
+from collections import namedtuple
 
 HOME = os.path.expanduser("~")
 STATE = os.path.join(HOME, ".config/omarchy/tablet.json")
 CTL = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tablet-ctl")
+
+# Window classes of file managers, in lower case. Dragging a file in one of these is how a pen
+# that touches down by accident moves a folder. More can be added in tablet.json ("fileManagers").
+FILE_MANAGERS = {
+    "org.gnome.nautilus", "nautilus", "thunar", "org.xfce.thunar", "org.kde.dolphin", "dolphin",
+    "nemo", "pcmanfm", "pcmanfm-qt", "caja", "spacefm", "org.kde.krusader", "krusader",
+    "doublecmd", "io.elementary.files", "com.system76.cosmicfiles",
+}
 
 POLL = 0.5   # seconds between window checks while locked
 IDLE = 2.0   # seconds between settings-file checks while free
@@ -101,11 +110,15 @@ async def run_cmd(*args, timeout=5):
         return ""
 
 
+Settings = namedtuple("Settings", "lock apps pen size tap ignore managers")
+
+
 class AreaLock:
     def __init__(self):
         self.rect = None        # what the pen is locked to now, None = free
         self.armed = False      # tap mode: a listed app has focus and waits for its activating tap
         self.focus = None       # class of the focused listed app, if any
+        self.in_manager = False  # a file manager has focus
         self.active = None      # tap mode: class the pen was activated on
         self.hold = None        # class the pen was released from by hand; hover mode keeps it free until focus leaves
         self.dirty = asyncio.Event()
@@ -113,26 +126,38 @@ class AreaLock:
         self.mtime = None
 
     def settings(self):
-        """(enabled, app classes, pen device, tablet size in mm, tap mode) from tablet.json."""
+        """The settings from tablet.json: whether the area lock is on, the app classes (lower
+        case), the pen device, the tablet size in mm, tap mode, whether taps in file managers are
+        ignored, and the file manager classes. The lock and the ignoring are independent."""
         try:
             with open(STATE) as f:
                 data = json.load(f)
         except (OSError, ValueError):
-            return False, set(), None, None, True
+            return Settings(False, set(), None, None, True, False, FILE_MANAGERS)
         last = data.get("lastDevice") or {}
         apps = {k.lower() for k, v in (data.get("apps") or {}).items()
                 if isinstance(v, dict) and v.get("mode", "window") == "window"}
         size = last.get("sizeMm")
-        enabled = data.get("areaLock") is True and bool(apps) and bool(last.get("pen")) and bool(size)
-        # A quarter-turn tablet is not handled yet.
+        lock = data.get("areaLock") is True and bool(apps) and bool(last.get("pen")) and bool(size)
+        # A quarter-turn tablet is not handled yet. Ignoring taps does not depend on the area.
         if data.get("rotation", 0) in (90, 270):
-            enabled = False
-        return enabled, apps, last.get("pen"), size, data.get("areaActivate", "tap") != "hover"
+            lock = False
+        extra = {c.lower() for c in (data.get("fileManagers") or []) if isinstance(c, str)}
+        return Settings(lock, apps, last.get("pen"), size, data.get("areaActivate", "tap") != "hover",
+                        data.get("ignoreFileManagerTaps") is True, FILE_MANAGERS | extra)
 
-    def tap_mode(self):
-        """True when the pen has to be routed through tablet-buttons' virtual pen to swallow taps."""
+    def swallows_taps(self):
+        """True when the pen has to be routed through tablet-buttons' virtual pen so taps can be
+        swallowed: to activate an app in tap mode, or to ignore taps in file managers."""
         settings = self.settings()
-        return settings[0] and settings[4]
+        return (settings.lock and settings.tap) or settings.ignore
+
+    def ignores_taps(self):
+        """True when taps are dropped while a file manager has focus.
+
+        This keeps a pen swept across a file manager from picking up and moving files. It works
+        with or without the area lock."""
+        return self.settings().ignore
 
     def activate(self):
         """The activating tap came in: lock to the focused listed app."""
@@ -175,24 +200,26 @@ class AreaLock:
             await self._evaluate()
 
     async def _evaluate(self):
-        enabled, apps, pen, size, tap = self.settings()
+        lock, apps, pen, size, tap, ignore, managers = self.settings()
         want = None
         window = {}
         self.focus = None
-        if enabled:
+        self.in_manager = False
+        if lock or ignore:
             try:
                 window = json.loads(await run_cmd("hyprctl", "activewindow", "-j") or "{}")
             except ValueError:
                 window = {}
+            self.in_manager = ignore and window.get("class", "").lower() in managers
             if window.get("class", "").lower() in apps and window.get("mapped", True):
                 self.focus = window["class"].lower()
-                if (self.active == self.focus) if tap else (self.hold != self.focus):
+                if lock and ((self.active == self.focus) if tap else (self.hold != self.focus)):
                     want = self.target(window, size)
         if self.focus != self.active:
             self.active = None  # focus left the app the tap activated
         if self.focus != self.hold:
             self.hold = None    # focus left the app the pen was released from
-        self.armed = tap and self.focus is not None and want is None
+        self.armed = lock and tap and self.focus is not None and want is None
         if want == self.rect:
             return
         if want:
@@ -219,7 +246,7 @@ class AreaLock:
         """Back to the mapping tablet.lua describes, without reloading Hyprland."""
         if self.rect is None:
             return
-        pen = pen or self.settings()[2]
+        pen = pen or self.settings().pen
         if not pen:
             return
         area = {}

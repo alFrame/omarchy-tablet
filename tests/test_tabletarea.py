@@ -89,5 +89,52 @@ class Scan(unittest.TestCase):
         self.assertEqual([a["name"] for a in apps], ["PhotoCraft (mine)"])
 
 
+class SettingsFile(unittest.TestCase):
+    """AreaLock.settings() reads tablet.json; point it at a temporary one."""
+
+    def settings(self, data):
+        import json
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "tablet.json")
+            with open(path, "w") as f:
+                json.dump(data, f)
+            saved, tabletarea.STATE = tabletarea.STATE, path
+            try:
+                return tabletarea.AreaLock().settings()
+            finally:
+                tabletarea.STATE = saved
+
+    BASE = {"areaLock": True, "apps": {"Blender": {"mode": "window"}},
+            "lastDevice": {"pen": "wacom-pen", "sizeMm": [223.5, 139.7]}}
+
+    def test_defaults_are_tap_without_ignoring(self):
+        s = self.settings(self.BASE)
+        self.assertTrue(s.lock)
+        self.assertTrue(s.tap)
+        self.assertFalse(s.ignore)
+        self.assertEqual(s.apps, {"blender"})  # compared in lower case
+
+    def test_hover_is_read(self):
+        self.assertFalse(self.settings({**self.BASE, "areaActivate": "hover"}).tap)
+
+    def test_lock_is_off_without_apps_or_while_rotated_a_quarter_turn(self):
+        self.assertFalse(self.settings({**self.BASE, "apps": {}}).lock)
+        self.assertFalse(self.settings({**self.BASE, "rotation": 90}).lock)
+        self.assertFalse(self.settings({**self.BASE, "areaLock": False}).lock)
+
+    def test_ignoring_file_manager_taps_is_off_by_default_and_independent_of_the_lock(self):
+        self.assertFalse(self.settings(self.BASE).ignore)
+        # No lock, no apps, a quarter-turn tablet: ignoring taps does not depend on any of them.
+        s = self.settings({"ignoreFileManagerTaps": True, "rotation": 90})
+        self.assertFalse(s.lock)
+        self.assertTrue(s.ignore)
+
+    def test_file_managers_are_built_in_plus_the_users_own(self):
+        s = self.settings({"ignoreFileManagerTaps": True, "fileManagers": ["MyFiles"]})
+        self.assertIn("org.gnome.nautilus", s.managers)
+        self.assertIn("myfiles", s.managers)  # lower case, like the window class it is compared with
+
+
 if __name__ == "__main__":
     unittest.main()
