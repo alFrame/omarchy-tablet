@@ -44,6 +44,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import tabletarea  # noqa: E402
 import tabletlib  # noqa: E402
 from evio import Device, UInput, ecodes as e  # noqa: E402
 
@@ -442,6 +443,17 @@ async def main():
     watcher = asyncio.create_task(watch_hyprland())  # noqa: F841  (kept alive for good)
     tasks = []
     signature = None
+    area = asyncio.create_task(tabletarea.AreaLock().run())
+    asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
+    try:
+        await watch(out, tasks, signature)
+    finally:
+        # Cancelling lets the area lock hand the pen back before the service stops.
+        area.cancel()
+        await asyncio.gather(area, return_exceptions=True)
+
+
+async def watch(out, tasks, signature):
     while True:
         tablet = tabletlib.detect()
         pen_path = tablet["pen"]["path"] if tablet and tablet.get("pen") else None
