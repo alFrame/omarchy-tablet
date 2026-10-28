@@ -43,6 +43,8 @@ DEFAULTS = {
     "fingerSpeed": 0.0,       # -1..1
     "naturalScroll": True,
     "tapToClick": True,
+    "areaLock": False,        # lock the pen to the window of the apps below
+    "apps": {},               # window class -> {"mode": "window"}
     "buttons": {},            # "pen1".."pen3" and pad key codes ("BTN_RIGHT") -> {action, value}
     "slotCodes": {},          # "vendor:product" -> {layout letter: code}, from Identify keys
     "lastDevice": {},         # names and size of the last tablet seen, for writing while unplugged
@@ -91,6 +93,8 @@ def sanitize(s):
     out["fingerSpeed"] = round(max(-1.0, min(1.0, float(s.get("fingerSpeed", 0)))), 2)
     out["naturalScroll"] = bool(s.get("naturalScroll"))
     out["tapToClick"] = bool(s.get("tapToClick"))
+    out["areaLock"] = bool(s.get("areaLock"))
+    out["apps"] = {str(k)[:200]: {"mode": "window"} for k, v in (s.get("apps") or {}).items() if isinstance(v, dict)}
     buttons = {}
     for key, spec in (s.get("buttons") or {}).items():
         if not isinstance(spec, dict):

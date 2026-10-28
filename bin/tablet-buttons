@@ -21,6 +21,7 @@ bar panel can light up the button that was pressed.
 import asyncio
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -29,6 +30,7 @@ import evdev
 from evdev import ecodes as e
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import tabletarea  # noqa: E402
 import tabletlib  # noqa: E402
 
 HOME = os.path.expanduser("~")
@@ -287,6 +289,17 @@ async def main():
     out = Outputs()
     tasks = []
     signature = None
+    area = asyncio.create_task(tabletarea.AreaLock().run())
+    asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
+    try:
+        await watch(out, tasks, signature)
+    finally:
+        # Cancelling lets the area lock hand the pen back before the service stops.
+        area.cancel()
+        await asyncio.gather(area, return_exceptions=True)
+
+
+async def watch(out, tasks, signature):
     while True:
         tablet = tabletlib.detect()
         pen_path = tablet["pen"]["path"] if tablet and tablet.get("pen") else None
