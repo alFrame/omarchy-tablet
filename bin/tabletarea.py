@@ -37,6 +37,50 @@ def log(*args):
     print("area:", *args, file=sys.stderr, flush=True)
 
 
+def parse_desktop(text, file_id):
+    """The launcher fields the app list needs from a .desktop file, or None when it is no drawing app.
+
+    A drawing app is a visible application in the Graphics menu category. Its window class is the
+    launcher's StartupWMClass when it has one; otherwise the file name stands in as a guess, which
+    `guessed` flags so the panel can say that the class may need correcting from an open window."""
+    fields = {}
+    in_entry = False
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("["):
+            in_entry = line == "[Desktop Entry]"
+        elif in_entry and "=" in line and not line.startswith("#"):
+            key, _, value = line.partition("=")
+            fields.setdefault(key.strip(), value.strip())  # first one wins: later ones are translations
+    if fields.get("Type") != "Application" or "Graphics" not in fields.get("Categories", "").split(";"):
+        return None
+    if fields.get("NoDisplay", "").lower() == "true" or fields.get("Hidden", "").lower() == "true":
+        return None
+    wm_class = fields.get("StartupWMClass", "")
+    return {"name": fields.get("Name") or file_id, "class": wm_class or file_id,
+            "icon": fields.get("Icon", ""), "guessed": not wm_class}
+
+
+def installed_apps(dirs=None):
+    """Drawing apps with a launcher, sorted by name. Earlier directories win, so a user's own
+    launcher beats the system one with the same class."""
+    if dirs is None:
+        data_home = os.environ.get("XDG_DATA_HOME") or os.path.join(HOME, ".local/share")
+        data_dirs = (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":")
+        dirs = [os.path.join(d, "applications") for d in [data_home, *data_dirs] if d]
+    found = {}
+    for directory in dirs:
+        for path in sorted(glob.glob(os.path.join(directory, "*.desktop"))):
+            try:
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    app = parse_desktop(f.read(), os.path.basename(path)[:-len(".desktop")])
+            except OSError:
+                continue
+            if app:
+                found.setdefault(app["class"].lower(), app)
+    return sorted(found.values(), key=lambda a: a["name"].lower())
+
+
 def socket_path():
     runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
     signature = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
@@ -76,7 +120,7 @@ class AreaLock:
         except (OSError, ValueError):
             return False, set(), None, None, True
         last = data.get("lastDevice") or {}
-        apps = {k for k, v in (data.get("apps") or {}).items()
+        apps = {k.lower() for k, v in (data.get("apps") or {}).items()
                 if isinstance(v, dict) and v.get("mode", "window") == "window"}
         size = last.get("sizeMm")
         enabled = data.get("areaLock") is True and bool(apps) and bool(last.get("pen")) and bool(size)
@@ -140,8 +184,8 @@ class AreaLock:
                 window = json.loads(await run_cmd("hyprctl", "activewindow", "-j") or "{}")
             except ValueError:
                 window = {}
-            if window.get("class") in apps and window.get("mapped", True):
-                self.focus = window["class"]
+            if window.get("class", "").lower() in apps and window.get("mapped", True):
+                self.focus = window["class"].lower()
                 if (self.active == self.focus) if tap else (self.hold != self.focus):
                     want = self.target(window, size)
         if self.focus != self.active:

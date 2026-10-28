@@ -48,5 +48,46 @@ class Target(unittest.TestCase):
         self.assertIsNone(tabletarea.AreaLock.target(window(0, 100), PTH650))
 
 
+PHOTOCRAFT = """[Desktop Entry]
+Type=Application
+Name=PhotoCraft
+Name[de]=FotoCraft
+Categories=Graphics;RasterGraphics;
+StartupWMClass=ai.storyteller.photocraft
+Icon=photocraft
+"""
+
+
+class Scan(unittest.TestCase):
+    def test_graphics_app_with_wm_class(self):
+        app = tabletarea.parse_desktop(PHOTOCRAFT, "ai.storyteller.photocraft")
+        self.assertEqual(app["name"], "PhotoCraft")  # not the German translation
+        self.assertEqual(app["class"], "ai.storyteller.photocraft")
+        self.assertFalse(app["guessed"])
+
+    def test_missing_wm_class_is_guessed_from_the_file_name(self):
+        text = "[Desktop Entry]\nType=Application\nName=Blender\nCategories=Graphics;3DGraphics;\n"
+        app = tabletarea.parse_desktop(text, "blender")
+        self.assertEqual(app["class"], "blender")
+        self.assertTrue(app["guessed"])
+
+    def test_other_categories_and_hidden_launchers_are_skipped(self):
+        self.assertIsNone(tabletarea.parse_desktop("[Desktop Entry]\nType=Application\nName=Kitty\nCategories=System;\n", "kitty"))
+        hidden = PHOTOCRAFT + "NoDisplay=true\n"
+        self.assertIsNone(tabletarea.parse_desktop(hidden, "x"))
+        # Fields outside [Desktop Entry] (actions) must not count.
+        action = "[Desktop Entry]\nType=Application\nName=A\n[Desktop Action x]\nCategories=Graphics;\n"
+        self.assertIsNone(tabletarea.parse_desktop(action, "a"))
+
+    def test_user_launcher_beats_system_one(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as user, tempfile.TemporaryDirectory() as system:
+            for directory, name in ((user, "PhotoCraft (mine)"), (system, "PhotoCraft")):
+                with open(os.path.join(directory, "photocraft.desktop"), "w") as f:
+                    f.write(PHOTOCRAFT.replace("Name=PhotoCraft", f"Name={name}"))
+            apps = tabletarea.installed_apps([user, system])
+        self.assertEqual([a["name"] for a in apps], ["PhotoCraft (mine)"])
+
+
 if __name__ == "__main__":
     unittest.main()
