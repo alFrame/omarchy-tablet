@@ -3,7 +3,9 @@
 A bar widget for the [Omarchy](https://omarchy.org) shell that sets up a Wacom
 pen tablet from the bar: which display the pen draws on, orientation
 (including flipped for left-handed use), active area, pressure, finger touch,
-and what every pen and tablet button does.
+and what every pen and tablet button does. It can also lock the pen to the
+window of the drawing apps you choose, and stop the pen from moving files by
+accident in a file manager.
 
 <img src="preview.png" alt="Tablet panel: Pen and Buttons tabs" width="720">
 
@@ -26,10 +28,72 @@ and what every pen and tablet button does.
   is drawn from its real layout; press a physical button and its picture and
   row light up. **Identify keys** relearns the key order if a model's data is
   incomplete.
+- **App windows** – lock the pen to the window of chosen apps (PhotoCraft,
+  Blender, Krita…): the whole tablet then maps onto that window, in its aspect
+  ratio so circles stay round, and the pen can't leave it. Everywhere else the
+  pen covers the desktop as before. See [App windows](#app-windows).
+- **Applications** – the list of apps for the lock, filled from the drawing
+  apps (Graphics category) found on the system, from the windows open now, or
+  by typing a window class.
+- **File managers** – optionally, the pen tip doesn't click in file managers,
+  so a pen that touches down by accident can't pick up and move a folder.
+  The mouse and the pen's buttons still work there.
 - The panel adapts to the tablet that's plugged in: tabs and buttons it doesn't
   have are hidden, and the bar icon disappears while no tablet is connected.
   Changes apply instantly and survive reboots. Colours and fonts follow the
   current Omarchy theme.
+
+## App windows
+
+Turn on **Lock pen to app windows** in the Pen tab and list your drawing apps
+in the **Applications** tab.
+
+<img src="ReadMe-Images/omarchy-tablet_MainTab_ApplicationSettings.jpg" alt="Pen tab: Lock pen to app windows and Activate by" width="416">
+
+<img src="ReadMe-Images/omarchy-tablet_ApplicationsTab.jpg" alt="Applications tab: your apps and suggestions" width="416">
+
+- **Scan for apps** lists the installed drawing apps (the Graphics category of
+  the app launcher). Add the ones you use, or dismiss the ones you don't want
+  to see; dismissed apps can be brought back. **Add an open window** takes the
+  window class from a window that is open now, which is the sure way for apps
+  whose launcher doesn't name their class. A window class can also be typed in.
+  Find it with `hyprctl clients`.
+- **Activate by Tap** (the default): the first tap of the pen on a listed app
+  only activates it. That tap never paints, selects or clicks; the next ones
+  do. **Hover** locks as soon as the pen is over the app, with no click, but
+  passing over a listed app on the way somewhere else then locks the pen to it.
+- The pen is released when focus moves to another window (super+tab, the
+  mouse, closing the app). To leave with the pen alone, set a tablet key or
+  pen button to **Pen area lock** in the Buttons tab: it releases the pen, and
+  presses it back onto the focused app.
+- While the pen is locked, a resized or moved window is followed within half a
+  second. While it isn't, nothing is polled.
+- The pointer jumps once when the lock engages, from where the pen was on the
+  desktop to the same spot on the tablet inside the window. 90° and 270° orientations
+  don't lock yet.
+
+### File managers
+
+<img src="ReadMe-Images/omarchy-tablet_MainTab_FileManagerSettings.jpg" alt="Ignore pen taps in file managers" width="416">
+
+**Ignore pen taps in file managers** (off by default) drops the pen's tip
+click while a file manager has focus. Nautilus, Thunar, Dolphin, Nemo,
+PCManFM, Caja, SpaceFM, Krusader, Double Commander, elementary Files and
+COSMIC Files are built in; add the window class of any other one in the panel.
+It works on its own, with or without the lock.
+
+### Settings in `tablet.json`
+
+All of this is set from the panel; the keys are listed for scripting.
+
+| Key | Meaning |
+|---|---|
+| `areaLock` | Lock the pen to the windows of the apps below. |
+| `areaActivate` | `"tap"` (default) or `"hover"`. |
+| `apps` | Window class → `{"mode": "window"}`. Matched without regard to case. |
+| `ignoredApps` | Classes the app scan no longer suggests. |
+| `ignoreFileManagerTaps` | Drop the pen tip's click in file managers. |
+| `fileManagers` | Window classes of file managers beyond the built-in ones. |
 
 ## Supported hardware
 
@@ -90,9 +154,17 @@ Updating from 0.1: button mappings are carried over automatically.
 | `Panel.qml` | The bar icon and panel. Every change is sent to `bin/tablet-ctl`. |
 | `bin/tabletlib.py` | Finds the tablet in `/proc/bus/input/devices` and reads its libwacom entry and layout. |
 | `bin/tablet-ctl` | Saves settings to `~/.config/omarchy/tablet.json`, generates `~/.config/hypr/tablet.lua`, reloads Hyprland. |
-| `bin/tablet-buttons` | User service. While any ExpressKey is remapped it grabs the pad and runs the actions through a virtual keyboard and mouse; keys left on App default are replayed through a virtual pad of the same name, so apps still see them. With every key on App default the pad isn't touched. The pen is only grabbed while a side button is remapped; it is then replayed through a virtual clone (`… Pen Remap`), so pressure and tilt keep working. |
+| `bin/tabletarea.py` | Runs inside the `tablet-buttons` service. Follows Hyprland's event socket and, for a listed app, maps the pen onto its window with `region_position` / `region_size`, using the part of the tablet that has the window's aspect ratio; releases it again when focus leaves. Also reads the installed launchers for the app scan. |
+| `bin/tablet-buttons` | User service. While any ExpressKey is remapped it grabs the pad and runs the actions through a virtual keyboard and mouse; keys left on App default are replayed through a virtual pad of the same name, so apps still see them. With every key on App default the pad isn't touched. The pen is only grabbed while a side button is remapped, tap activation is on, or taps in file managers are ignored; it is then replayed through a virtual clone (`… Pen Remap`), so pressure and tilt keep working. |
 
-`tablet.lua` is generated: change settings from the panel, not by hand.
+The pen's pressure arrives before its touch in the same frame, so the service
+looks at a whole frame before deciding whether to swallow a tap.
+
+`tablet.lua` is generated: change settings from the panel, not by hand. The
+app and file-manager settings don't appear in it: only the service reads them.
+
+`python3 -m unittest discover tests` runs the checks for the window and
+launcher maths.
 
 `bin/tablet-ctl toggle fingerEnabled` flips finger touch on or off with a
 notification, so it can go on a tablet button or a Hyprland keybinding.
