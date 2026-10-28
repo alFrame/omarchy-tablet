@@ -44,6 +44,7 @@ DEFAULTS = {
     "naturalScroll": True,
     "tapToClick": True,
     "areaLock": False,        # lock the pen to the window of the apps below
+    "areaActivate": "tap",     # "tap": the first pen tap on a listed app only activates it; "hover": focus does
     "apps": {},               # window class -> {"mode": "window"}
     "buttons": {},            # "pen1".."pen3" and pad key codes ("BTN_RIGHT") -> {action, value}
     "slotCodes": {},          # "vendor:product" -> {layout letter: code}, from Identify keys
@@ -94,6 +95,7 @@ def sanitize(s):
     out["naturalScroll"] = bool(s.get("naturalScroll"))
     out["tapToClick"] = bool(s.get("tapToClick"))
     out["areaLock"] = bool(s.get("areaLock"))
+    out["areaActivate"] = "hover" if s.get("areaActivate") == "hover" else "tap"
     out["apps"] = {str(k)[:200]: {"mode": "window"} for k, v in (s.get("apps") or {}).items() if isinstance(v, dict)}
     buttons = {}
     for key, spec in (s.get("buttons") or {}).items():

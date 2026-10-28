@@ -243,11 +243,11 @@ async def run_pad(dev, buttons, out):
         dev.close()
 
 
-async def run_pen(dev, buttons, out):
+async def run_pen(dev, buttons, out, area):
     names = tabletlib.PEN_BUTTONS
     remapped = {code for code, name in names.items()
                 if buttons.get(name, {}).get("action", "default") != "default"}
-    if not remapped:
+    if not remapped and not area.tap_mode():
         # Nothing to change: leave the real pen alone, only report presses for the panel.
         try:
             async for ev in events(dev):
@@ -259,16 +259,47 @@ async def run_pen(dev, buttons, out):
 
     clone = clone_of(dev, dev.name + tabletlib.REMAP_SUFFIX)
     dev.grab()
+    swallow = False  # the tip is down on a tap that only activates an app
+    tap = area.tap_mode()
+    def handle(ev):
+        nonlocal swallow
+        if ev.type == e.EV_KEY and ev.code == e.BTN_TOUCH:
+            if swallow:
+                swallow = ev.value != 0
+                return
+        elif swallow and ev.type == e.EV_ABS and ev.code == e.ABS_PRESSURE:
+            clone.write(e.EV_ABS, e.ABS_PRESSURE, 0)
+            return
+        elif ev.type == e.EV_KEY and ev.code in (e.BTN_TOOL_PEN, e.BTN_TOOL_RUBBER) and ev.value == 0:
+            swallow = False
+        if ev.type == e.EV_KEY and ev.code in names:
+            name = names[ev.code]
+            mark(name, ev.value == 1)
+            if ev.code in remapped:
+                if ev.value in (0, 1):
+                    out.press(name, buttons[name], ev.value == 1)
+                return
+        clone.write_event(ev)
+
+    frame = []
     try:
         async for ev in events(dev):
-            if ev.type == e.EV_KEY and ev.code in names:
-                name = names[ev.code]
-                mark(name, ev.value == 1)
-                if ev.code in remapped:
-                    if ev.value in (0, 1):
-                        out.press(name, buttons[name], ev.value == 1)
-                    continue
-            clone.write_event(ev)
+            frame.append(ev)
+            if ev.type != e.EV_SYN or ev.code != e.SYN_REPORT:
+                continue
+            # The kernel reports the pressure of a touch-down before its BTN_TOUCH, in the same
+            # frame, so the whole frame is looked at before any of it goes out.
+            if tap and any(f.type == e.EV_KEY and f.code == e.BTN_TOUCH and f.value == 1 for f in frame):
+                if area.rect is None:
+                    # Focus follows the pen, so look again rather than trust a flag that may lag a tap.
+                    await area.evaluate()
+                    tabletarea.log("tap", "swallowed" if area.armed else "passed", f"(focus={area.focus})")
+                if area.armed:
+                    swallow = True
+                    area.activate()
+            for f in frame:
+                handle(f)
+            frame = []
     finally:
         try:
             dev.ungrab()
@@ -289,17 +320,18 @@ async def main():
     out = Outputs()
     tasks = []
     signature = None
-    area = asyncio.create_task(tabletarea.AreaLock().run())
+    lock = tabletarea.AreaLock()
+    area = asyncio.create_task(lock.run())
     asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
     try:
-        await watch(out, tasks, signature)
+        await watch(out, tasks, signature, lock)
     finally:
         # Cancelling lets the area lock hand the pen back before the service stops.
         area.cancel()
         await asyncio.gather(area, return_exceptions=True)
 
 
-async def watch(out, tasks, signature):
+async def watch(out, tasks, signature, area):
     while True:
         tablet = tabletlib.detect()
         pen_path = tablet["pen"]["path"] if tablet and tablet.get("pen") else None
@@ -321,7 +353,7 @@ async def watch(out, tasks, signature):
             if pad:
                 tasks.append(asyncio.create_task(run_pad(pad, buttons, out)))
             if pen:
-                tasks.append(asyncio.create_task(run_pen(pen, buttons, out)))
+                tasks.append(asyncio.create_task(run_pen(pen, buttons, out, area)))
             log("tablet:", tablet["kernelName"] if tablet else "-",
                 "| pen" if pen else "| -", "pad" if pad else "-",
                 "| pen remap:", [k for k in ("pen1", "pen2", "pen3")
