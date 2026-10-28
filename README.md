@@ -7,6 +7,12 @@ and what every pen and tablet button does. It can also lock the pen to the
 window of the drawing apps you choose, and stop the pen from moving files by
 accident in a file manager.
 
+> **Experimental fork** of [mug31/omarchy-tablet](https://github.com/mug31/omarchy-tablet)
+> (MIT), which does all the groundwork: the panel, the tablet detection, the
+> button remapping. The app-window lock and the file-manager guard are added on
+> top, and have only been tried on an Intuos5 touch M (PTH-650) with Hyprland
+> 0.56.2. Use it at your own risk, as the licence says.
+
 <img src="preview.png" alt="Tablet panel: Pen and Buttons tabs" width="720">
 
 ## Features
