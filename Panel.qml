@@ -212,6 +212,22 @@ Panel {
     set("apps", apps)
   }
 
+  function hasManager(cls) {
+    var list = settings_.fileManagers || []
+    for (var i = 0; i < list.length; i++) if (classKey(list[i]) === classKey(cls)) return true
+    return false
+  }
+
+  function addManager(cls) {
+    cls = String(cls).trim()
+    if (cls === "" || hasManager(cls)) return
+    set("fileManagers", (settings_.fileManagers || []).concat([cls]))
+  }
+
+  function removeManager(cls) {
+    set("fileManagers", (settings_.fileManagers || []).filter(function(c) { return c !== cls }))
+  }
+
   function dismissApp(cls) {
     set("ignoredApps", (settings_.ignoredApps || []).concat([cls]))
   }
@@ -668,6 +684,73 @@ Panel {
               fontFamily: root.uiFont
               fontSize: Style.font.bodySmall
               onChanged: function(v) { root.set("areaActivate", v) }
+            }
+          }
+
+          Header { text: "FILE MANAGERS" }
+
+          // Independent of the lock and the app list.
+          SwitchRow {
+            label: "Ignore pen taps in file managers"
+            tooltip: "The pen tip doesn't click in file managers, so files can't be moved by accident. The mouse and pen buttons still work."
+            checked: root.s("ignoreFileManagerTaps", false) === true
+            onToggled: root.set("ignoreFileManagerTaps", !checked)
+          }
+
+          // File managers beyond the built-in ones (Nautilus, Thunar, Dolphin, Nemo, PCManFM…).
+          Column {
+            visible: root.s("ignoreFileManagerTaps", false) === true
+            width: parent.width
+            spacing: Style.space(8)
+
+            Text {
+              width: parent.width
+              text: "Built in: Nautilus, Thunar, Dolphin, Nemo, PCManFM, Caja and a few more. Using another one? Add its window class (hyprctl clients shows it)."
+              color: root.dim
+              font.family: root.uiFont
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+
+            Repeater {
+              model: root.s("fileManagers", [])
+              AppRow {
+                title: modelData
+                primaryIcon: "\uf00d"
+                primaryTip: "Remove"
+                onPrimary: root.removeManager(modelData)
+              }
+            }
+
+            Item {
+              width: parent.width
+              implicitHeight: Math.max(managerField.implicitHeight, addManagerButton.implicitHeight)
+              height: implicitHeight
+
+              PlainField {
+                id: managerField
+                anchors.left: parent.left
+                anchors.right: addManagerButton.left
+                anchors.rightMargin: Style.space(6)
+                anchors.verticalCenter: parent.verticalCenter
+                placeholderText: "window class, e.g. org.kde.dolphin"
+              }
+
+              Button {
+                id: addManagerButton
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                iconText: "\uf067"
+                tooltipText: "Add this window class"
+                bordered: true
+                foreground: root.fg
+                fontFamily: root.uiFont
+                fontSize: Style.font.caption
+                onClicked: {
+                  root.addManager(managerField.text)
+                  managerField.text = ""
+                }
+              }
             }
           }
         }

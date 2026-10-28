@@ -250,7 +250,7 @@ async def run_pen(dev, buttons, out, area):
     names = tabletlib.PEN_BUTTONS
     remapped = {code for code, name in names.items()
                 if buttons.get(name, {}).get("action", "default") != "default"}
-    if not remapped and not area.tap_mode():
+    if not remapped and not area.swallows_taps():
         # Nothing to change: leave the real pen alone, only report presses for the panel.
         try:
             async for ev in events(dev):
@@ -263,7 +263,8 @@ async def run_pen(dev, buttons, out, area):
     clone = clone_of(dev, dev.name + tabletlib.REMAP_SUFFIX)
     dev.grab()
     swallow = False  # the tip is down on a tap that only activates an app
-    tap = area.tap_mode()
+    routed = area.swallows_taps()
+    ignore = area.ignores_taps()
     def handle(ev):
         nonlocal swallow
         if ev.type == e.EV_KEY and ev.code == e.BTN_TOUCH:
@@ -292,14 +293,18 @@ async def run_pen(dev, buttons, out, area):
                 continue
             # The kernel reports the pressure of a touch-down before its BTN_TOUCH, in the same
             # frame, so the whole frame is looked at before any of it goes out.
-            if tap and any(f.type == e.EV_KEY and f.code == e.BTN_TOUCH and f.value == 1 for f in frame):
+            if routed and any(f.type == e.EV_KEY and f.code == e.BTN_TOUCH and f.value == 1 for f in frame):
                 if area.rect is None:
                     # Focus follows the pen, so look again rather than trust a flag that may lag a tap.
+                    # (Locked, the focus is the locked app and a change arrives as an event.)
                     await area.evaluate()
-                    tabletarea.log("tap", "swallowed" if area.armed else "passed", f"(focus={area.focus})")
+                    tabletarea.log("tap", "activates" if area.armed else "ignored" if ignore else "passed",
+                                   f"(focus={area.focus})")
                 if area.armed:
                     swallow = True
                     area.activate()
+                elif ignore and area.in_manager:
+                    swallow = True  # a file manager has focus: the tap is dropped
             for f in frame:
                 handle(f)
             frame = []

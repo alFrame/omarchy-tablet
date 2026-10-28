@@ -46,6 +46,8 @@ DEFAULTS = {
     "tapToClick": True,
     "areaLock": False,        # lock the pen to the window of the apps below
     "areaActivate": "tap",     # "tap": the first pen tap on a listed app only activates it; "hover": focus does
+    "ignoreFileManagerTaps": False,  # the pen tip does not click in file managers (no stray drags)
+    "fileManagers": [],       # window classes of file managers beyond the built-in ones
     "apps": {},               # window class -> {"mode": "window"}
     "ignoredApps": [],        # window classes the panel's app scan should not suggest
     "buttons": {},            # "pen1".."pen3" and pad key codes ("BTN_RIGHT") -> {action, value}
@@ -97,6 +99,8 @@ def sanitize(s):
     out["naturalScroll"] = bool(s.get("naturalScroll"))
     out["tapToClick"] = bool(s.get("tapToClick"))
     out["areaLock"] = bool(s.get("areaLock"))
+    out["ignoreFileManagerTaps"] = bool(s.get("ignoreFileManagerTaps"))
+    out["fileManagers"] = [str(c)[:200] for c in (s.get("fileManagers") or []) if isinstance(c, str)][:100]
     out["areaActivate"] = "hover" if s.get("areaActivate") == "hover" else "tap"
     out["apps"] = {str(k)[:200]: {"mode": "window"} for k, v in (s.get("apps") or {}).items() if isinstance(v, dict)}
     out["ignoredApps"] = [str(c)[:200] for c in (s.get("ignoredApps") or []) if isinstance(c, str)][:500]
@@ -268,7 +272,7 @@ def spawn_unlatch():
 
 # Settings only tablet-buttons reads. Changing them leaves tablet.lua as it is, so there is
 # nothing to reload; a reload would also drop an area lock for a moment.
-SERVICE_ONLY = {"areaLock", "areaActivate", "apps", "ignoredApps"}
+SERVICE_ONLY = {"areaLock", "areaActivate", "ignoreFileManagerTaps", "fileManagers", "apps", "ignoredApps"}
 
 
 def write(s, apply=True):
