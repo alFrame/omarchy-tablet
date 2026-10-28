@@ -21,6 +21,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import tabletarea  # noqa: E402
 import tabletlib  # noqa: E402
 
 HOME = os.path.expanduser("~")
@@ -46,6 +47,7 @@ DEFAULTS = {
     "areaLock": False,        # lock the pen to the window of the apps below
     "areaActivate": "tap",     # "tap": the first pen tap on a listed app only activates it; "hover": focus does
     "apps": {},               # window class -> {"mode": "window"}
+    "ignoredApps": [],        # window classes the panel's app scan should not suggest
     "buttons": {},            # "pen1".."pen3" and pad key codes ("BTN_RIGHT") -> {action, value}
     "slotCodes": {},          # "vendor:product" -> {layout letter: code}, from Identify keys
     "lastDevice": {},         # names and size of the last tablet seen, for writing while unplugged
@@ -97,6 +99,7 @@ def sanitize(s):
     out["areaLock"] = bool(s.get("areaLock"))
     out["areaActivate"] = "hover" if s.get("areaActivate") == "hover" else "tap"
     out["apps"] = {str(k)[:200]: {"mode": "window"} for k, v in (s.get("apps") or {}).items() if isinstance(v, dict)}
+    out["ignoredApps"] = [str(c)[:200] for c in (s.get("ignoredApps") or []) if isinstance(c, str)][:500]
     buttons = {}
     for key, spec in (s.get("buttons") or {}).items():
         if not isinstance(spec, dict):
@@ -369,6 +372,25 @@ def status(s, error=""):
     }
 
 
+def apps_report(s):
+    """What the Applications tab shows: scanned drawing apps and open windows.
+
+    Both lists are marked with what the user already decided, so the panel can hide the apps
+    that are listed or dismissed without asking again."""
+    listed = {c.lower() for c in s["apps"]}
+    ignored = {c.lower() for c in s["ignoredApps"]}
+    candidates = [dict(a, listed=a["class"].lower() in listed, ignored=a["class"].lower() in ignored)
+                  for a in tabletarea.installed_apps()]
+    seen = set()
+    windows = []
+    for c in hypr_json("clients") or []:
+        cls = c.get("class") or ""
+        if cls and cls.lower() not in seen:
+            seen.add(cls.lower())
+            windows.append({"class": cls, "title": c.get("title", ""), "listed": cls.lower() in listed})
+    return {"candidates": candidates, "windows": windows}
+
+
 def merge(s, patch):
     out = dict(s)
     for key, value in patch.items():
@@ -421,6 +443,9 @@ def main():
         finger = s["lastDevice"].get("finger")
         if finger and s["rotation"] != 180:
             unlatch(finger)
+        return
+    elif cmd == "apps":
+        print(json.dumps(apps_report(s)))
         return
     elif cmd != "status":
         print(__doc__, file=sys.stderr)
