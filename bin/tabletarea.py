@@ -63,6 +63,7 @@ class AreaLock:
         self.armed = False      # tap mode: a listed app has focus and waits for its activating tap
         self.focus = None       # class of the focused listed app, if any
         self.active = None      # tap mode: class the pen was activated on
+        self.hold = None        # class the pen was released from by hand; hover mode keeps it free until focus leaves
         self.dirty = asyncio.Event()
         self.busy = asyncio.Lock()  # one evaluation at a time: the event loop and a tap can both ask
         self.mtime = None
@@ -93,7 +94,23 @@ class AreaLock:
         """The activating tap came in: lock to the focused listed app."""
         if self.armed:
             self.active = self.focus
+            self.hold = None
             self.dirty.set()
+
+    def toggle(self):
+        """The "arealock" key: let the pen go, or lock it to the focused listed app again.
+
+        Letting go is what lets a pen-only user leave the window without the mouse. The pen is
+        still over the app when the key is pressed, so in hover mode, where focus alone locks,
+        `hold` stops the lock from coming straight back; it lasts until focus moves elsewhere.
+        In tap mode the next tap on the app is an explicit choice, so nothing needs holding."""
+        if self.rect is not None:
+            self.active = None
+            self.hold = self.focus
+        elif self.focus:
+            self.hold = None
+            self.active = self.focus
+        self.dirty.set()
 
     @staticmethod
     def target(window, size):
@@ -125,10 +142,12 @@ class AreaLock:
                 window = {}
             if window.get("class") in apps and window.get("mapped", True):
                 self.focus = window["class"]
-                if not tap or self.active == self.focus:
+                if (self.active == self.focus) if tap else (self.hold != self.focus):
                     want = self.target(window, size)
         if self.focus != self.active:
             self.active = None  # focus left the app the tap activated
+        if self.focus != self.hold:
+            self.hold = None    # focus left the app the pen was released from
         self.armed = tap and self.focus is not None and want is None
         if want == self.rect:
             return
