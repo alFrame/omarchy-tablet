@@ -7,6 +7,12 @@ region_size) using the largest centred part of the tablet with the window's
 aspect ratio, so circles stay round. When focus moves to any other window the
 pen goes back to the normal mapping from tablet.lua.
 
+"areaActivate" decides what engages the lock. "hover": focus alone, which the
+pen gives by moving the cursor. "tap" (default): the first tap of the pen tip
+on a listed app only activates it; tablet-buttons swallows that tap (see
+run_pen) so it cannot paint, select or click, and the lock engages. Later taps
+reach the app as usual.
+
 Hyprland tells us about focus, moves, fullscreen and closed windows over its
 event socket, so nothing is polled while the pen is free. It sends no event
 for a resize, so while locked the window is re-read twice a second.
@@ -54,16 +60,20 @@ async def run_cmd(*args, timeout=5):
 class AreaLock:
     def __init__(self):
         self.rect = None        # what the pen is locked to now, None = free
+        self.armed = False      # tap mode: a listed app has focus and waits for its activating tap
+        self.focus = None       # class of the focused listed app, if any
+        self.active = None      # tap mode: class the pen was activated on
         self.dirty = asyncio.Event()
+        self.busy = asyncio.Lock()  # one evaluation at a time: the event loop and a tap can both ask
         self.mtime = None
 
     def settings(self):
-        """(enabled, app classes, pen device, tablet size in mm) from tablet.json."""
+        """(enabled, app classes, pen device, tablet size in mm, tap mode) from tablet.json."""
         try:
             with open(STATE) as f:
                 data = json.load(f)
         except (OSError, ValueError):
-            return False, set(), None, None
+            return False, set(), None, None, True
         last = data.get("lastDevice") or {}
         apps = {k for k, v in (data.get("apps") or {}).items()
                 if isinstance(v, dict) and v.get("mode", "window") == "window"}
@@ -72,7 +82,18 @@ class AreaLock:
         # A quarter-turn tablet is not handled yet.
         if data.get("rotation", 0) in (90, 270):
             enabled = False
-        return enabled, apps, last.get("pen"), size
+        return enabled, apps, last.get("pen"), size, data.get("areaActivate", "tap") != "hover"
+
+    def tap_mode(self):
+        """True when the pen has to be routed through tablet-buttons' virtual pen to swallow taps."""
+        settings = self.settings()
+        return settings[0] and settings[4]
+
+    def activate(self):
+        """The activating tap came in: lock to the focused listed app."""
+        if self.armed:
+            self.active = self.focus
+            self.dirty.set()
 
     @staticmethod
     def target(window, size):
@@ -89,15 +110,26 @@ class AreaLock:
         return (x, y, w, h, round(aw, 2), round(ah, 2), round((tw - aw) / 2, 2), round((th - ah) / 2, 2))
 
     async def evaluate(self):
-        enabled, apps, pen, size = self.settings()
+        async with self.busy:
+            await self._evaluate()
+
+    async def _evaluate(self):
+        enabled, apps, pen, size, tap = self.settings()
         want = None
+        window = {}
+        self.focus = None
         if enabled:
             try:
                 window = json.loads(await run_cmd("hyprctl", "activewindow", "-j") or "{}")
             except ValueError:
                 window = {}
             if window.get("class") in apps and window.get("mapped", True):
-                want = self.target(window, size)
+                self.focus = window["class"]
+                if not tap or self.active == self.focus:
+                    want = self.target(window, size)
+        if self.focus != self.active:
+            self.active = None  # focus left the app the tap activated
+        self.armed = tap and self.focus is not None and want is None
         if want == self.rect:
             return
         if want:
