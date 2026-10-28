@@ -15,6 +15,36 @@ accident in a file manager.
 
 <img src="preview.png" alt="Tablet panel: Pen and Buttons tabs" width="720">
 
+<details>
+<summary><b>Additional Screenshots</b></summary>
+
+<table>
+<tr>
+  <td align="center" valign="top">
+    <a href="ReadMe-Images/omarchy-tablet_MainTab.jpg"><img src="ReadMe-Images/omarchy-tablet_MainTab.jpg" alt="Pen tab" 
+width="180"></a><br>
+    <sub><strong>Pen Tab</strong></sub>
+  </td>
+  <td align="center" valign="top">
+    <a href="ReadMe-Images/omarchy-tablet_TouchTab.jpg"><img src="ReadMe-Images/omarchy-tablet_TouchTab.jpg" alt="Touch tab" 
+width="180"></a><br>
+    <sub><strong>Touch Tab</strong></sub>
+  </td>
+  <td align="center" valign="top">
+    <a href="ReadMe-Images/omarchy-tablet_ButtonsTab.jpg"><img src="ReadMe-Images/omarchy-tablet_ButtonsTab.jpg" alt="Buttons tab" 
+width="180"></a><br>
+    <sub><strong>Buttons Tab</strong></sub>
+  </td>
+  <td align="center" valign="top">
+    <a href="ReadMe-Images/omarchy-tablet_ApplicationsTab.jpg"><img src="ReadMe-Images/omarchy-tablet_ApplicationsTab.jpg" 
+alt="Applications tab" width="180"></a><br>
+    <sub><strong>Applications Tab</strong></sub>
+  </td>
+</tr>
+</table>
+
+</details>
+
 ## Features
 
 - **Pen** – target display (any monitor or all of them), active-area size with
@@ -60,23 +90,19 @@ in the **Applications** tab.
 
 - **Scan for apps** lists the installed drawing apps (the Graphics category of
   the app launcher). Add the ones you use, or dismiss the ones you don't want
-  to see; dismissed apps can be brought back. **Add an open window** takes the
-  window class from a window that is open now, which is the sure way for apps
-  whose launcher doesn't name their class. A window class can also be typed in.
-  Find it with `hyprctl clients`.
+  to lock  the pen to; dismissed apps can be brought back. **Add an open window** takes the window class from a window that is open now, which is the sure way for apps whose launcher doesn't name their class. A window class can also be typed in. In a consle find the app name using `hyprctl clients`.
 - **Activate by Tap** (the default): the first tap of the pen on a listed app
-  only activates it. That tap never paints, selects or clicks; the next ones
+  only activates the app. That tap never paints, selects or clicks; the next ones
   do. **Hover** locks as soon as the pen is over the app, with no click, but
   passing over a listed app on the way somewhere else then locks the pen to it.
 - The pen is released when focus moves to another window (super+tab, the
   mouse, closing the app). To leave with the pen alone, set a tablet key or
   pen button to **Pen area lock** in the Buttons tab: it releases the pen, and
-  presses it back onto the focused app.
+  pressing it locks the pen back  onto the app in focus.
 - While the pen is locked, a resized or moved window is followed within half a
   second. While it isn't, nothing is polled.
 - The pointer jumps once when the lock engages, from where the pen was on the
-  desktop to the same spot on the tablet inside the window. 90° and 270° orientations
-  don't lock yet.
+  desktop to the same spot on the tablet inside the window. 90° and 270° orientations don't lock yet.
 
 ### File managers
 
@@ -88,18 +114,20 @@ PCManFM, Caja, SpaceFM, Krusader, Double Commander, elementary Files and
 COSMIC Files are built in; add the window class of any other one in the panel.
 It works on its own, with or without the lock.
 
+In a consle find the app name using `hyprctl clients`.
+
 ### Settings in `tablet.json`
 
 All of this is set from the panel; the keys are listed for scripting.
 
-| Key | Meaning |
-|---|---|
-| `areaLock` | Lock the pen to the windows of the apps below. |
-| `areaActivate` | `"tap"` (default) or `"hover"`. |
-| `apps` | Window class → `{"mode": "window"}`. Matched without regard to case. |
-| `ignoredApps` | Classes the app scan no longer suggests. |
-| `ignoreFileManagerTaps` | Drop the pen tip's click in file managers. |
-| `fileManagers` | Window classes of file managers beyond the built-in ones. |
+| Key                     | Meaning                                                              |
+| ----------------------- | -------------------------------------------------------------------- |
+| `areaLock`              | Lock the pen to the windows of the apps below.                       |
+| `areaActivate`          | `"tap"` (default) or `"hover"`.                                      |
+| `apps`                  | Window class → `{"mode": "window"}`. Matched without regard to case. |
+| `ignoredApps`           | Classes the app scan no longer suggests.                             |
+| `ignoreFileManagerTaps` | Drop the pen tip's click in file managers.                           |
+| `fileManagers`          | Window classes of file managers beyond the built-in ones.            |
 
 ## Supported hardware
 
@@ -109,15 +137,15 @@ support, key codes and key layout come from **libwacom**, already installed on
 every Omarchy system as a libinput dependency; the active-area size comes from
 the driver.
 
-| Family | Models | Notes |
-|---|---|---|
-| Bamboo Pen & Touch, Fun, SE | CTH-460/461/661 and (A)/SE variants | **Tested on a CTH-460(A).** 4 keys, touch |
-| Bamboo Capture, Create, 16FG | CTH-470/670, CTT-470 | 4 keys, touch |
-| Bamboo Touch | CTT-460/460(A) | touch and keys, no pen |
-| Bamboo Pen, Connect, One | CTL-460/660/470, CTF-430, CTE-660 | pen only |
-| Bamboo Fun / Pen (older) | CTE-450/650, MTE-450 | 4 keys along the top |
-| Bamboo Pad | CTH-300/301 | 2 keys, touch |
-| Intuos S/M, One by Wacom | CTL/CTH-480/490/680/690, CTL-4100/6100, CTL-471/472/671/672 | Intuos Pen & Touch 1st/2nd gen: run **Identify keys** once, libwacom doesn't record their key order |
+| Family                       | Models                                                      | Notes                                                                                               |
+| ---------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Bamboo Pen & Touch, Fun, SE  | CTH-460/461/661 and (A)/SE variants                         | **Tested on a CTH-460(A).** 4 keys, touch                                                           |
+| Bamboo Capture, Create, 16FG | CTH-470/670, CTT-470                                        | 4 keys, touch                                                                                       |
+| Bamboo Touch                 | CTT-460/460(A)                                              | touch and keys, no pen                                                                              |
+| Bamboo Pen, Connect, One     | CTL-460/660/470, CTF-430, CTE-660                           | pen only                                                                                            |
+| Bamboo Fun / Pen (older)     | CTE-450/650, MTE-450                                        | 4 keys along the top                                                                                |
+| Bamboo Pad                   | CTH-300/301                                                 | 2 keys, touch                                                                                       |
+| Intuos S/M, One by Wacom     | CTL/CTH-480/490/680/690, CTL-4100/6100, CTL-471/472/671/672 | Intuos Pen & Touch 1st/2nd gen: run **Identify keys** once, libwacom doesn't record their key order |
 
 Only the CTH-460(A) has been tried on real hardware; the others were checked
 against libwacom's data and with virtual devices. Reports are welcome.
@@ -127,6 +155,7 @@ Touch rings and strips on pads are not handled.
 ## Requirements
 
 - Omarchy 4.x with the Lua Hyprland config (`~/.config/hypr/hyprland.lua`).
+
 - The kernel `wacom` driver. Check with `lsmod | grep wacom`.
   **OpenTabletDriver blocks it** (`/usr/lib/modprobe.d/99-opentabletdriver.conf`).
   To use this widget instead of OpenTabletDriver:
@@ -155,12 +184,12 @@ Updating from 0.1: button mappings are carried over automatically.
 
 ## How it works
 
-| Piece | Role |
-|---|---|
-| `Panel.qml` | The bar icon and panel. Every change is sent to `bin/tablet-ctl`. |
-| `bin/tabletlib.py` | Finds the tablet in `/proc/bus/input/devices` and reads its libwacom entry and layout. |
-| `bin/tablet-ctl` | Saves settings to `~/.config/omarchy/tablet.json`, generates `~/.config/hypr/tablet.lua`, reloads Hyprland. |
-| `bin/tabletarea.py` | Runs inside the `tablet-buttons` service. Follows Hyprland's event socket and, for a listed app, maps the pen onto its window with `region_position` / `region_size`, using the part of the tablet that has the window's aspect ratio; releases it again when focus leaves. Also reads the installed launchers for the app scan. |
+| Piece                | Role                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Panel.qml`          | The bar icon and panel. Every change is sent to `bin/tablet-ctl`n.                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `bin/tabletlib.py`   | Finds the tablet in `/proc/bus/input/devices` and reads its libwacom entry and layout.                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `bin/tablet-ctl`     | Saves settings to `~/.config/omarchy/tablet.json`, generates `~/.config/hypr/tablet.lua`, reloads Hyprland.                                                                                                                                                                                                                                                                                                                                                                                                |
+| `bin/tabletarea.py`  | Runs inside the `tablet-buttons` service. Follows Hyprland's event socket and, for a listed app, maps the pen onto its window with `region_position` / `region_size`, using the part of the tablet that has the window's aspect ratio; releases it again when focus leaves. Also reads the installed launchers for the app scan.                                                                                                                                                                           |
 | `bin/tablet-buttons` | User service. While any ExpressKey is remapped it grabs the pad and runs the actions through a virtual keyboard and mouse; keys left on App default are replayed through a virtual pad of the same name, so apps still see them. With every key on App default the pad isn't touched. The pen is only grabbed while a side button is remapped, tap activation is on, or taps in file managers are ignored; it is then replayed through a virtual clone (`… Pen Remap`), so pressure and tilt keep working. |
 
 The pen's pressure arrives before its touch in the same frame, so the service
