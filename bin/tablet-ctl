@@ -266,7 +266,12 @@ def spawn_unlatch():
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def write(s):
+# Settings only tablet-buttons reads. Changing them leaves tablet.lua as it is, so there is
+# nothing to reload; a reload would also drop an area lock for a moment.
+SERVICE_ONLY = {"areaLock", "areaActivate", "apps", "ignoredApps"}
+
+
+def write(s, apply=True):
     try:
         with open(STATE) as f:
             previous_rotation = json.load(f).get("rotation", 0)
@@ -282,6 +287,8 @@ def write(s):
     with open(tmp, "w") as f:
         json.dump(s, f, indent=2)
     os.replace(tmp, STATE)
+    if not apply:
+        return ""
     tmp = LUA + ".tmp"
     with open(tmp, "w") as f:
         f.write(render(s, area(s, mons, size), size, dev.get("pen"), dev.get("finger")))
@@ -416,7 +423,7 @@ def main():
     if cmd == "set":
         patch = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
         s = sanitize(merge(s, patch))
-        error = write(s)
+        error = write(s, apply=not set(patch) <= SERVICE_ONLY)
         s = load()
     elif cmd == "toggle":
         key = sys.argv[2] if len(sys.argv) > 2 else ""
