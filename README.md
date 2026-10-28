@@ -81,28 +81,35 @@ alt="Applications tab" width="180"></a><br>
 
 ## App windows
 
-Turn on **Lock pen to app windows** in the Pen tab and list your drawing apps
-in the **Applications** tab.
+Switch **Lock pen to app windows** on in the Pen tab and check the list of your drawing apps in the **Applications** tab.
 
 <img src="ReadMe-Images/omarchy-tablet_MainTab_ApplicationSettings.jpg" alt="Pen tab: Lock pen to app windows and Activate by" width="416">
 
-<img src="ReadMe-Images/omarchy-tablet_ApplicationsTab.jpg" alt="Applications tab: your apps and suggestions" width="416">
+- **Activate by Tap** (the default): the first tap of the pen on a listed app
+  only activates the app. That tap never paints, selects or clicks; the next ones
+  do.
+- **Hover** locks as soon as the pen is hovering over the app, with no click, but
+  passing over a listed app on the way somewhere else then locks the pen to it.
+- The pen is released when focus moves to another window (super+tab, the
+  mouse, closing the app).
+- **Pro Tip** To leave the lock mode, when you are using the pen alone, set a tablet key or pen button to **Pen area lock** in the Buttons tab: it releases the pen, and
+  pressing it locks the pen back onto the app in focus, when pressing it again.
+- While the pen is locked, a resized or moved window is followed.
+- The pointer jumps once when the lock engages, from where the pen was on the
+  desktop to the same spot on the tablet inside the window. 90° and 270° orientations don't lock yet.
+
+####   The Applications tab
+
+<img src="ReadMe-Images/omarchy-tablet_MainTab_ApplicationSettings-Short.jpg" alt="Applications tab: your apps and suggestions" width="416">
 
 - **Scan for apps** lists the installed drawing apps (the Graphics category of
   the app launcher). Add the ones you use, or dismiss the ones you don't want
-  to lock  the pen to; dismissed apps can be brought back. **Add an open window** takes the window class from a window that is open now, which is the sure way for apps whose launcher doesn't name their class. A window class can also be typed in. In a consle find the app name using `hyprctl clients`.
-- **Activate by Tap** (the default): the first tap of the pen on a listed app
-  only activates the app. That tap never paints, selects or clicks; the next ones
-  do. **Hover** locks as soon as the pen is over the app, with no click, but
-  passing over a listed app on the way somewhere else then locks the pen to it.
-- The pen is released when focus moves to another window (super+tab, the
-  mouse, closing the app). To leave with the pen alone, set a tablet key or
-  pen button to **Pen area lock** in the Buttons tab: it releases the pen, and
-  pressing it locks the pen back  onto the app in focus.
-- While the pen is locked, a resized or moved window is followed within half a
-  second. While it isn't, nothing is polled.
-- The pointer jumps once when the lock engages, from where the pen was on the
-  desktop to the same spot on the tablet inside the window. 90° and 270° orientations don't lock yet.
+  to lock the pen to; dismissed apps can be brought back.
+- To add an App from the list, click the "+" icon. It will slide up under **Your Apps**
+- To remove an app from the **Your Apps** list, click the "X" icon. It will slide back to the ignored list.
+- To remove an app from the list completely, click the "X" on the item in the ignore list and it will be removed.
+- **Add an open window** takes the window class from a window that is open now, which is the sure way for apps whose launcher doesn't name their class.
+- A window class can also be typed in. In a console find the app name using `hyprctl clients`.
 
 ### File managers
 
@@ -114,14 +121,14 @@ PCManFM, Caja, SpaceFM, Krusader, Double Commander, elementary Files and
 COSMIC Files are built in; add the window class of any other one in the panel.
 It works on its own, with or without the lock.
 
-In a consle find the app name using `hyprctl clients`.
+In a console find the app name using `hyprctl clients`.
 
 ### Settings in `tablet.json`
 
 All of this is set from the panel; the keys are listed for scripting.
 
 | Key                     | Meaning                                                              |
-| ----------------------- | -------------------------------------------------------------------- |
+| :----------------------- | :-------------------------------------------------------------------- |
 | `areaLock`              | Lock the pen to the windows of the apps below.                       |
 | `areaActivate`          | `"tap"` (default) or `"hover"`.                                      |
 | `apps`                  | Window class → `{"mode": "window"}`. Matched without regard to case. |
@@ -138,7 +145,7 @@ every Omarchy system as a libinput dependency; the active-area size comes from
 the driver.
 
 | Family                       | Models                                                      | Notes                                                                                               |
-| ---------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| :---------------------------- | :----------------------------------------------------------- | :--------------------------------------------------------------------------------------------------- |
 | Bamboo Pen & Touch, Fun, SE  | CTH-460/461/661 and (A)/SE variants                         | **Tested on a CTH-460(A).** 4 keys, touch                                                           |
 | Bamboo Capture, Create, 16FG | CTH-470/670, CTT-470                                        | 4 keys, touch                                                                                       |
 | Bamboo Touch                 | CTT-460/460(A)                                              | touch and keys, no pen                                                                              |
@@ -185,7 +192,7 @@ Updating from 0.1: button mappings are carried over automatically.
 ## How it works
 
 | Piece                | Role                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| :-------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Panel.qml`          | The bar icon and panel. Every change is sent to `bin/tablet-ctl`n.                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `bin/tabletlib.py`   | Finds the tablet in `/proc/bus/input/devices` and reads its libwacom entry and layout.                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `bin/tablet-ctl`     | Saves settings to `~/.config/omarchy/tablet.json`, generates `~/.config/hypr/tablet.lua`, reloads Hyprland.                                                                                                                                                                                                                                                                                                                                                                                                |
