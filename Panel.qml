@@ -80,6 +80,7 @@ Panel {
     { value: "middle", label: "Middle click" },
     { value: "key", label: "Shortcut" },
     { value: "command", label: "Command" },
+    { value: "arealock", label: "Pen area lock" },
     { value: "none", label: "Disabled" }
   ]
   readonly property var padActions: penActions

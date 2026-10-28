@@ -121,6 +121,7 @@ class Outputs:
             name="Tablet Buttons Mouse",
         )
         self.held = {}
+        self.area = None  # the AreaLock, set once it exists, for the "arealock" action
 
     def press(self, button, spec, down):
         action = spec.get("action", "none")
@@ -142,6 +143,8 @@ class Outputs:
                 for code in reversed(self.held.pop(button, [])):
                     self.kbd.write(e.EV_KEY, code, 0)
                 self.kbd.syn()
+        elif action == "arealock" and down and self.area:
+            self.area.toggle()
         elif action == "command" and down and value.strip():
             subprocess.Popen(["sh", "-c", value], start_new_session=True,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -321,6 +324,7 @@ async def main():
     tasks = []
     signature = None
     lock = tabletarea.AreaLock()
+    out.area = lock
     area = asyncio.create_task(lock.run())
     asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
     try:
