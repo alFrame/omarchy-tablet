@@ -1622,7 +1622,7 @@ Panel {
     // Size of the drawing once turned.
     readonly property real shownW: quarter ? ch : cw
     readonly property real shownH: quarter ? cw : ch
-    readonly property real k: Math.min(width / shownW, Style.space(150) / shownH)
+    readonly property real k: Math.min(width / shownW, Style.space(190) / shownH)
 
     implicitHeight: shownH * k + Style.space(4)
 
