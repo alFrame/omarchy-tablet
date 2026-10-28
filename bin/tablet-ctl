@@ -287,7 +287,12 @@ def apply(s):
     return "" if out.returncode == 0 else (out.stdout + out.stderr).strip()
 
 
-def write(s):
+# Settings only tablet-buttons reads. Changing them leaves the Hyprland settings as they are,
+# so there is nothing to send; sending them again would also drop an area lock for a moment.
+SERVICE_ONLY = {"areaLock", "areaActivate", "apps", "ignoredApps"}
+
+
+def write(s, send=True):
     try:
         with open(STATE) as f:
             previous_rotation = json.load(f).get("rotation", 0)
@@ -300,7 +305,7 @@ def write(s):
     with open(tmp, "w") as f:
         json.dump(s, f, indent=2)
     os.replace(tmp, STATE)
-    error = apply(s)
+    error = apply(s) if send else ""
     if s["lastDevice"].get("finger") and previous_rotation != s["rotation"] and s["rotation"] != 180:
         spawn_unlatch()
     return error
@@ -446,7 +451,7 @@ def main():
     if cmd == "set":
         patch = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
         s = sanitize(merge(s, patch))
-        error = write(s)
+        error = write(s, send=not set(patch) <= SERVICE_ONLY)
         s = load()
     elif cmd == "toggle":
         key = sys.argv[2] if len(sys.argv) > 2 else ""
