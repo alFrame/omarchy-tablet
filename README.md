@@ -51,8 +51,8 @@ alt="Applications tab" width="180"></a><br>
   a scale preview, crop to the display's aspect ratio so circles stay round,
   pressure sensitivity.
 - **Orientation** – *Flipped* turns the pen, finger touch and the key order
-  around for left-handed use (libinput's left-handed mode). 90° and 270° turn
-  the pen only.
+  around for left-handed use. *90°* and *270°* hold the tablet portrait: pen,
+  finger touch and key order all turn with it, and palm rejection keeps working.
 - **Touch** – finger touch on/off (handy while drawing), pointer speed, tap to
   click, natural scrolling.
 - **Buttons** – remap the pen side buttons and the ExpressKeys to a click, a
@@ -79,28 +79,41 @@ alt="Applications tab" width="180"></a><br>
   Changes apply instantly and survive reboots. Colours and fonts follow the
   current Omarchy theme.
 
-## App windows
+## APP WINDOWS
 
-Switch **Lock pen to app windows** on in the Pen tab and check the list of your drawing apps in the **Applications** tab.
+Switch **Lock pen to app windows** on in the Pen tab, then choose how the lock starts (see below). With **Hover** and **Tap**, also add your drawing apps in the **Applications** tab. **Button** works with any window, so it needs no list.
 
-<img src="ReadMe-Images/omarchy-tablet_MainTab_ApplicationSettings.jpg" alt="Pen tab: Lock pen to app windows and Activate by" width="416">
+<img src="ReadMe-Images/omarchy-tablet_AppWindows-Button.jpg" alt="Pen tab: Lock pen to app windows and Activate by clicking/pressing the defined button on the pen, or the tablet" width="416">
 
-- **Activate by Tap** (the default): the first tap of the pen on a listed app
-  only activates the app. That tap never paints, selects or clicks; the next ones
-  do.
-- **Hover** locks as soon as the pen is hovering over the app, with no click, but
+- **Activate by Button** (the default): assign a tablet key or pen button to
+  **Pen Area Lock/Unlock** in the Buttons tab. Pressing it locks the pen to the
+  window under the pen tip, whether or not the app is in the list; pressing it
+  again releases the pen.
+
+<img src="ReadMe-Images/omarchy-tablet_AppWindows-Hover.jpg" alt="Pen tab: Lock pen to app windows and Activate by hovering over the target app" width="416">
+
+- **Hover** picks the app up as soon as the pen hovers over it, with no click, but
   passing over a listed app on the way somewhere else then locks the pen to it.
-- The pen is released when focus moves to another window (super+tab, the
-  mouse, closing the app).
-- **Pro Tip** To leave the lock mode, when you are using the pen alone, set a tablet key or pen button to **Pen area lock** in the Buttons tab: it releases the pen, and
-  pressing it locks the pen back onto the app in focus, when pressing it again.
-- While the pen is locked, a resized or moved window is followed.
-- The pointer jumps once when the lock engages, from where the pen was on the
-  desktop to the same spot on the tablet inside the window. 90° and 270° orientations don't lock yet.
+  Release the lock with the mouse, or with a button set to Pen Area Lock/Unlock.
 
-####   The Applications tab
+<img src="ReadMe-Images/omarchy-tablet_AppWindows-Tap.jpg" alt="Pen tab: Lock pen to app windows and Activate by tapping the target app (EXPERIMENTAL!!)" width="416">
 
-<img src="ReadMe-Images/omarchy-tablet_MainTab_ApplicationSettings-Short.jpg" alt="Applications tab: your apps and suggestions" width="416">
+- **Tap** (experimental): tap a listed app and the pen locks to it as soon as it
+  lifts. The tap itself still reaches the app, so it can draw a dot, or a line if
+  you start painting at once as the area changes.
+- **Attention**: The pen is only released when focus moves to another window by either using super+tab to tab to another window, moving the mouse to another window, clicking or pressing the defined button on the pen or the tablet, or closing the app.
+
+- **Pro Tip** To leave the lock mode, when you are using the pen alone, set a tablet key or pen button to **Pen Area Lock/Unlock** in the Buttons tab: it releases the pen, and pressing it again locks the pen back onto the app in focus.
+
+**General Notes**
+- While the pen is locked, a resized or moved window is followed and the pen motion is locked to that window.
+- The pointer jumps once when the lock engages, from where the pen was on the desktop to the same spot on the tablet inside the window. 90° and 270° orientations don't lock yet.
+
+### The Applications tab
+
+The list is used by **Hover** and **Tap**. In **Button** mode the tab is greyed out, because the button locks whichever window is under the pen.
+
+<img src="ReadMe-Images/omarchy-tablet_ApplicationsTab-Short.jpg" alt="Applications tab: your apps and suggestions" width="416">
 
 - **Scan for apps** lists the installed drawing apps (the Graphics category of
   the app launcher). Add the ones you use, or dismiss the ones you don't want
@@ -111,7 +124,7 @@ Switch **Lock pen to app windows** on in the Pen tab and check the list of your 
 - **Add an open window** takes the window class from a window that is open now, which is the sure way for apps whose launcher doesn't name their class.
 - A window class can also be typed in. In a console find the app name using `hyprctl clients`.
 
-### File managers
+## FILE MANAGERS
 
 <img src="ReadMe-Images/omarchy-tablet_MainTab_FileManagerSettings.jpg" alt="Ignore pen taps in file managers" width="416">
 
@@ -123,14 +136,14 @@ It works on its own, with or without the lock.
 
 In a console find the app name using `hyprctl clients`.
 
-### Settings in `tablet.json`
+## Settings in `tablet.json`
 
 All of this is set from the panel; the keys are listed for scripting.
 
 | Key                     | Meaning                                                              |
 | :----------------------- | :-------------------------------------------------------------------- |
 | `areaLock`              | Lock the pen to the windows of the apps below.                       |
-| `areaActivate`          | `"tap"` (default) or `"hover"`.                                      |
+| `areaActivate`          | `"button"` (default), `"hover"` or `"tap"`.                          |
 | `apps`                  | Window class → `{"mode": "window"}`. Matched without regard to case. |
 | `ignoredApps`           | Classes the app scan no longer suggests.                             |
 | `ignoreFileManagerTaps` | Drop the pen tip's click in file managers.                           |
@@ -144,18 +157,24 @@ support, key codes and key layout come from **libwacom**, already installed on
 every Omarchy system as a libinput dependency; the active-area size comes from
 the driver.
 
-| Family                       | Models                                                      | Notes                                                                                               |
-| :---------------------------- | :----------------------------------------------------------- | :--------------------------------------------------------------------------------------------------- |
-| Bamboo Pen & Touch, Fun, SE  | CTH-460/461/661 and (A)/SE variants                         | **Tested on a CTH-460(A).** 4 keys, touch                                                           |
-| Bamboo Capture, Create, 16FG | CTH-470/670, CTT-470                                        | 4 keys, touch                                                                                       |
-| Bamboo Touch                 | CTT-460/460(A)                                              | touch and keys, no pen                                                                              |
-| Bamboo Pen, Connect, One     | CTL-460/660/470, CTF-430, CTE-660                           | pen only                                                                                            |
-| Bamboo Fun / Pen (older)     | CTE-450/650, MTE-450                                        | 4 keys along the top                                                                                |
-| Bamboo Pad                   | CTH-300/301                                                 | 2 keys, touch                                                                                       |
-| Intuos S/M, One by Wacom     | CTL/CTH-480/490/680/690, CTL-4100/6100, CTL-471/472/671/672 | Intuos Pen & Touch 1st/2nd gen: run **Identify keys** once, libwacom doesn't record their key order |
+✅ = confirmed working on real hardware · ☐ = should work (checked against
+libwacom's data and with virtual devices), not tried yet
 
-Only the CTH-460(A) has been tried on real hardware; the others were checked
-against libwacom's data and with virtual devices. Reports are welcome.
+| | Family | Models | Notes |
+|---|---|---|---|
+| ✅ | Bamboo Pen & Touch, Fun, SE | CTH-460/461/661 and (A)/SE variants | CTH-460(A), the author's tablet: pen, touch, 4 keys, every orientation |
+| ✅ | Intuos5 | PTH-650 | [Reported by a user](https://github.com/mug31/omarchy-tablet/issues/1): every key recognised. 8 keys, touch; the touch ring isn't handled |
+| ☐ | Bamboo Capture, Create, 16FG | CTH-470/670, CTT-470 | 4 keys, touch |
+| ☐ | Bamboo Touch | CTT-460/460(A) | touch and keys, no pen |
+| ☐ | Bamboo Pen, Connect, One | CTL-460/660/470, CTF-430, CTE-660 | pen only |
+| ☐ | Bamboo Fun / Pen (older) | CTE-450/650, MTE-450 | 4 keys along the top |
+| ☐ | Bamboo Pad | CTH-300/301 | 2 keys, touch |
+| ☐ | Intuos S/M, One by Wacom | CTL/CTH-480/490/680/690, CTL-4100/6100, CTL-471/472/671/672 | Intuos Pen & Touch 1st/2nd gen: run **Identify keys** once, libwacom doesn't record their key order |
+
+Got it working on a model not ticked here, or found one that doesn't?
+[Open an issue](https://github.com/mug31/omarchy-tablet/issues) with the model
+number and it'll be added.
+
 Huion, XP-Pen and other brands use different drivers and are not supported.
 Touch rings and strips on pads are not handled.
 
@@ -173,7 +192,7 @@ Touch rings and strips on pads are not handled.
   sudo modprobe wacom                                          # then replug the tablet
   ```
 
-- `python-evdev` for button remapping: `omarchy pkg add python-evdev`.
+Nothing else to install: the widget only uses Python's standard library.
 
 ## Install
 
@@ -181,29 +200,38 @@ Touch rings and strips on pads are not handled.
 omarchy plugin add https://github.com/mug31/omarchy-tablet.git --enable
 ```
 
-Open the pencil icon in the bar and press **Finish setup** once. Setup:
+That's it: there is no setup step and the Hyprland config is never edited.
 
-1. writes `~/.config/hypr/tablet.lua` and adds `require("hypr.tablet")` to
-   `~/.config/hypr/hyprland.lua` (after `require("hypr.input")`);
-2. installs and starts the `tablet-buttons` systemd user service.
+**Button remapping and portrait** need to grab the tablet and create virtual
+input devices, which a stock Omarchy keeps to root. If so, the panel shows
+**Enable**: it asks for your password once (pkexec) and installs
+`/etc/udev/rules.d/70-omarchy-wacom-bamboo.rules`, which gives the logged-in
+user access to `/dev/uinput` and to Wacom tablets only. It takes effect
+straight away, without logging out.
 
-Updating from 0.1: button mappings are carried over automatically.
+**Updating from 0.3 or older** happens on its own the first time the bar
+loads 0.4: the `require("hypr.tablet")` line is removed from
+`hyprland.lua` (the old file is kept as `hyprland.lua.wacom-bamboo.bak`),
+`tablet.lua` becomes `tablet.lua.bak`, and the `tablet-buttons` systemd
+service is stopped and its unit kept as `tablet-buttons.service.bak`.
+Settings and button mappings carry over.
 
 ## How it works
 
-| Piece                | Role                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| :-------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Panel.qml`          | The bar icon and panel. Every change is sent to `bin/tablet-ctl`n.                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `bin/tabletlib.py`   | Finds the tablet in `/proc/bus/input/devices` and reads its libwacom entry and layout.                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `bin/tablet-ctl`     | Saves settings to `~/.config/omarchy/tablet.json`, generates `~/.config/hypr/tablet.lua`, reloads Hyprland.                                                                                                                                                                                                                                                                                                                                                                                                |
-| `bin/tabletarea.py`  | Runs inside the `tablet-buttons` service. Follows Hyprland's event socket and, for a listed app, maps the pen onto its window with `region_position` / `region_size`, using the part of the tablet that has the window's aspect ratio; releases it again when focus leaves. Also reads the installed launchers for the app scan.                                                                                                                                                                           |
-| `bin/tablet-buttons` | User service. While any ExpressKey is remapped it grabs the pad and runs the actions through a virtual keyboard and mouse; keys left on App default are replayed through a virtual pad of the same name, so apps still see them. With every key on App default the pad isn't touched. The pen is only grabbed while a side button is remapped, tap activation is on, or taps in file managers are ignored; it is then replayed through a virtual clone (`… Pen Remap`), so pressure and tilt keep working. |
+| Piece | Role |
+| :--- | :--- |
+| `Panel.qml` | The bar icon and panel. Every change is sent to `bin/tablet-ctl`. |
+| `bin/tabletlib.py` | Finds the tablet in `/proc/bus/input/devices` and reads its libwacom entry and layout. |
+| `bin/tablet-ctl` | Saves settings to `~/.config/omarchy/tablet.json` and sends them to Hyprland with `hyprctl eval`. |
+| `bin/tabletarea.py` | Runs inside `tablet-buttons`. Follows Hyprland's event socket and maps the pen onto a window with `region_position` / `region_size`, using the part of the tablet that has the window's aspect ratio. In Button mode that is the window under the pen; in Hover and Tap mode it is a listed app. Releases the pen when focus leaves. Also reads the installed launchers for the app scan. |
+| `bin/tablet-buttons` | Helper the panel keeps running (one per session; extra bars wait their turn). Re-applies the settings when the session starts, the tablet is plugged in, Hyprland reloads its config or a monitor changes. While any ExpressKey is remapped it grabs the pad and runs the actions through a virtual keyboard and mouse; keys left on App default are replayed through a virtual pad of the same name, so apps still see them. The pen is grabbed while a side button is remapped, the tablet is portrait or taps in file managers are ignored, and replayed through a virtual clone (`… Pen Remap`) so pressure and tilt keep working; in portrait the finger touch is replayed turned (`… Finger Rotated`). Log: `~/.cache/omarchy-tablet/tablet-buttons.log`. |
+| `bin/evio.py` | Minimal evdev/uinput access (reading, grabbing, virtual devices) from the standard library. |
 
-The pen's pressure arrives before its touch in the same frame, so the service
-looks at a whole frame before deciding whether to swallow a tap.
+The pen's pressure arrives before its touch in the same frame, so the helper
+looks at a whole frame before deciding whether to drop a tap in a file manager.
 
-`tablet.lua` is generated: change settings from the panel, not by hand. The
-app and file-manager settings don't appear in it: only the service reads them.
+The app and file-manager settings are only read by `tablet-buttons`; changing
+them sends nothing to Hyprland.
 
 `python3 -m unittest discover tests` runs the checks for the window and
 launcher maths.
@@ -214,12 +242,13 @@ notification, so it can go on a tablet button or a Hyprland keybinding.
 ## Uninstall
 
 ```bash
-systemctl --user disable --now tablet-buttons.service
-rm ~/.config/systemd/user/tablet-buttons.service
-sed -i '/require("hypr.tablet")/d' ~/.config/hypr/hyprland.lua
-rm ~/.config/hypr/tablet.lua ~/.config/omarchy/tablet.json
 omarchy plugin remove io.github.mug31.wacom-bamboo
+rm ~/.config/omarchy/tablet.json                            # saved settings
+sudo rm /etc/udev/rules.d/70-omarchy-wacom-bamboo.rules     # only if you pressed Enable
 ```
+
+The settings were only ever applied at runtime, so they are gone after the
+next Hyprland reload or login.
 
 ## License
 
