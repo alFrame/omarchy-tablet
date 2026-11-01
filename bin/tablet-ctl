@@ -50,7 +50,7 @@ DEFAULTS = {
     "naturalScroll": True,
     "tapToClick": True,
     "areaLock": False,        # lock the pen to the window of the apps below
-    "areaActivate": "tap",     # "tap": the first pen tap on a listed app only activates it; "hover": focus does
+    "areaActivate": "button",  # "button": the arealock key locks the focused window; "hover": focus on a listed app does; "tap": a tap on one does
     "ignoreFileManagerTaps": False,  # the pen tip does not click in file managers (no stray drags)
     "fileManagers": [],       # window classes of file managers beyond the built-in ones
     "apps": {},               # window class -> {"mode": "window"}
@@ -106,7 +106,7 @@ def sanitize(s):
     out["areaLock"] = bool(s.get("areaLock"))
     out["ignoreFileManagerTaps"] = bool(s.get("ignoreFileManagerTaps"))
     out["fileManagers"] = [str(c)[:200] for c in (s.get("fileManagers") or []) if isinstance(c, str)][:100]
-    out["areaActivate"] = "hover" if s.get("areaActivate") == "hover" else "tap"
+    out["areaActivate"] = s["areaActivate"] if s.get("areaActivate") in ("hover", "tap") else "button"
     out["apps"] = {str(k)[:200]: {"mode": "window"} for k, v in (s.get("apps") or {}).items() if isinstance(v, dict)}
     out["ignoredApps"] = [str(c)[:200] for c in (s.get("ignoredApps") or []) if isinstance(c, str)][:500]
     buttons = {}

@@ -108,18 +108,24 @@ class SettingsFile(unittest.TestCase):
     BASE = {"areaLock": True, "apps": {"Blender": {"mode": "window"}},
             "lastDevice": {"pen": "wacom-pen", "sizeMm": [223.5, 139.7]}}
 
-    def test_defaults_are_tap_without_ignoring(self):
+    def test_defaults_are_button_without_ignoring(self):
         s = self.settings(self.BASE)
         self.assertTrue(s.lock)
-        self.assertTrue(s.tap)
+        self.assertEqual(s.mode, "button")
         self.assertFalse(s.ignore)
         self.assertEqual(s.apps, {"blender"})  # compared in lower case
 
-    def test_hover_is_read(self):
-        self.assertFalse(self.settings({**self.BASE, "areaActivate": "hover"}).tap)
+    def test_modes_are_read(self):
+        for mode in ("hover", "tap", "button"):
+            self.assertEqual(self.settings({**self.BASE, "areaActivate": mode}).mode, mode)
+        self.assertEqual(self.settings({**self.BASE, "areaActivate": "bogus"}).mode, "button")
+
+    def test_button_mode_needs_no_app_list(self):
+        self.assertTrue(self.settings({**self.BASE, "apps": {}}).lock)
+        self.assertFalse(self.settings({**self.BASE, "apps": {}, "areaActivate": "tap"}).lock)
 
     def test_lock_is_off_without_apps_or_while_rotated_a_quarter_turn(self):
-        self.assertFalse(self.settings({**self.BASE, "apps": {}}).lock)
+        self.assertFalse(self.settings({**self.BASE, "apps": {}, "areaActivate": "hover"}).lock)
         self.assertFalse(self.settings({**self.BASE, "rotation": 90}).lock)
         self.assertFalse(self.settings({**self.BASE, "areaLock": False}).lock)
 

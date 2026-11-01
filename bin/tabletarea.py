@@ -1,17 +1,20 @@
 """Lock the pen to the window of a chosen app.
 
-Runs inside the tablet-buttons service. When "areaLock" is on in
+Runs inside tablet-buttons. When "areaLock" is on in
 ~/.config/omarchy/tablet.json and the focused window's class is listed in
 "apps", the pen is mapped onto that window (Hyprland's region_position /
 region_size) using the largest centred part of the tablet with the window's
 aspect ratio, so circles stay round. When focus moves to any other window the
-pen goes back to the normal mapping from tablet.lua.
+pen goes back to the normal mapping from tablet.json.
 
-"areaActivate" decides what engages the lock. "hover": focus alone, which the
-pen gives by moving the cursor. "tap" (default): the first tap of the pen tip
-on a listed app only activates it; tablet-buttons swallows that tap (see
-run_pen) so it cannot paint, select or click, and the lock engages. Later taps
-reach the app as usual.
+"areaActivate" decides what engages the lock. "button" (default): only the
+"arealock" key or pen button, which locks the pen to the focused window, listed
+or not, and releases it again. "hover": focus alone on a listed app, which the
+pen gives by moving the cursor. "tap": the first tap of the pen tip on a listed
+app engages the lock once the tip lifts. The tap itself reaches the
+app (a dot, a click): the pen is not grabbed for it, so there is no virtual pen
+and no lag. The mapping never changes while the tip is down, so the pointer
+cannot jump into the middle of a stroke and draw a line.
 
 Hyprland tells us about focus, moves, fullscreen and closed windows over its
 event socket, so nothing is polled while the pen is free. It sends no event
@@ -110,13 +113,14 @@ async def run_cmd(*args, timeout=5):
         return ""
 
 
-Settings = namedtuple("Settings", "lock apps pen size tap ignore managers")
+Settings = namedtuple("Settings", "lock apps pen size mode ignore managers")
 
 
 class AreaLock:
     def __init__(self):
         self.rect = None        # what the pen is locked to now, None = free
-        self.armed = False      # tap mode: a listed app has focus and waits for its activating tap
+        self.tip_down = False   # the pen tip touches the tablet: the mapping must not change now
+        self.tapped = False     # the tip lifted since the last look: that was a tap on the focused window
         self.focus = None       # class of the focused listed app, if any
         self.in_manager = False  # a file manager has focus
         self.active = None      # tap mode: class the pen was activated on
@@ -127,30 +131,33 @@ class AreaLock:
 
     def settings(self):
         """The settings from tablet.json: whether the area lock is on, the app classes (lower
-        case), the pen device, the tablet size in mm, tap mode, whether taps in file managers are
+        case), the pen device, the tablet size in mm, the activation mode ("button", "hover" or "tap"), whether taps in file managers are
         ignored, and the file manager classes. The lock and the ignoring are independent."""
         try:
             with open(STATE) as f:
                 data = json.load(f)
         except (OSError, ValueError):
-            return Settings(False, set(), None, None, True, False, FILE_MANAGERS)
+            return Settings(False, set(), None, None, "button", False, FILE_MANAGERS)
         last = data.get("lastDevice") or {}
         apps = {k.lower() for k, v in (data.get("apps") or {}).items()
                 if isinstance(v, dict) and v.get("mode", "window") == "window"}
         size = last.get("sizeMm")
-        lock = data.get("areaLock") is True and bool(apps) and bool(last.get("pen")) and bool(size)
+        mode = data.get("areaActivate")
+        mode = mode if mode in ("hover", "tap") else "button"
+        # The button locks any window, so it needs no app list.
+        lock = data.get("areaLock") is True and (bool(apps) or mode == "button") \
+            and bool(last.get("pen")) and bool(size)
         # A quarter-turn tablet is not handled yet. Ignoring taps does not depend on the area.
         if data.get("rotation", 0) in (90, 270):
             lock = False
         extra = {c.lower() for c in (data.get("fileManagers") or []) if isinstance(c, str)}
-        return Settings(lock, apps, last.get("pen"), size, data.get("areaActivate", "tap") != "hover",
+        return Settings(lock, apps, last.get("pen"), size, mode,
                         data.get("ignoreFileManagerTaps") is True, FILE_MANAGERS | extra)
 
     def swallows_taps(self):
         """True when the pen has to be routed through tablet-buttons' virtual pen so taps can be
-        swallowed: to activate an app in tap mode, or to ignore taps in file managers."""
-        settings = self.settings()
-        return (settings.lock and settings.tap) or settings.ignore
+        dropped, which is only to ignore taps in file managers. Tap activation does not need it."""
+        return self.settings().ignore
 
     def ignores_taps(self):
         """True when taps are dropped while a file manager has focus.
@@ -159,11 +166,14 @@ class AreaLock:
         with or without the area lock."""
         return self.settings().ignore
 
-    def activate(self):
-        """The activating tap came in: lock to the focused listed app."""
-        if self.armed:
-            self.active = self.focus
-            self.hold = None
+    def pen_touch(self, down):
+        """The pen tip touched the tablet or left it. A lift is a tap on whatever has focus; the
+        lock engages then, never while the tip is down."""
+        if down:
+            self.tip_down = True
+        elif self.tip_down:
+            self.tip_down = False
+            self.tapped = True
             self.dirty.set()
 
     def toggle(self):
@@ -172,13 +182,18 @@ class AreaLock:
         Letting go is what lets a pen-only user leave the window without the mouse. The pen is
         still over the app when the key is pressed, so in hover mode, where focus alone locks,
         `hold` stops the lock from coming straight back; it lasts until focus moves elsewhere.
-        In tap mode the next tap on the app is an explicit choice, so nothing needs holding."""
+        In tap and button mode locking is an explicit choice, so nothing needs holding."""
         if self.rect is not None:
             self.active = None
             self.hold = self.focus
         elif self.focus:
             self.hold = None
             self.active = self.focus
+        self.dirty.set()
+
+    def reapply(self):
+        """Something sent the pen's settings to Hyprland again, which drops the lock: apply it anew."""
+        self.rect = None
         self.dirty.set()
 
     @staticmethod
@@ -200,7 +215,7 @@ class AreaLock:
             await self._evaluate()
 
     async def _evaluate(self):
-        lock, apps, pen, size, tap, ignore, managers = self.settings()
+        lock, apps, pen, size, mode, ignore, managers = self.settings()
         want = None
         window = {}
         self.focus = None
@@ -211,17 +226,23 @@ class AreaLock:
             except ValueError:
                 window = {}
             self.in_manager = ignore and window.get("class", "").lower() in managers
-            if window.get("class", "").lower() in apps and window.get("mapped", True):
-                self.focus = window["class"].lower()
-                if lock and ((self.active == self.focus) if tap else (self.hold != self.focus)):
+            cls = window.get("class", "").lower()
+            if cls and (mode == "button" or cls in apps) and window.get("mapped", True):
+                self.focus = cls
+                if self.tapped and lock and mode == "tap":
+                    self.active = self.focus  # a tap on a listed app is the choice to lock
+                    self.hold = None
+                if lock and ((self.hold != self.focus) if mode == "hover" else (self.active == self.focus)):
                     want = self.target(window, size)
+        self.tapped = False
         if self.focus != self.active:
             self.active = None  # focus left the app the tap activated
         if self.focus != self.hold:
             self.hold = None    # focus left the app the pen was released from
-        self.armed = lock and tap and self.focus is not None and want is None
         if want == self.rect:
             return
+        if self.tip_down:
+            return  # a jump mid-stroke would draw a line; the lift asks again
         if want:
             await self.apply(pen, {
                 "active_area_size": f"{want[4]} {want[5]}",
@@ -243,7 +264,7 @@ class AreaLock:
             await run_cmd("hyprctl", "eval", f'hl.device({{ name = "{name}", {body} }})')
 
     async def release(self, pen=None):
-        """Back to the mapping tablet.lua describes, without reloading Hyprland."""
+        """Back to the mapping the settings describe, as `tablet-ctl status` reports it."""
         if self.rect is None:
             return
         pen = pen or self.settings().pen
@@ -292,14 +313,19 @@ class AreaLock:
                 except asyncio.TimeoutError:
                     timed_out = True
                 self.dirty.clear()
-                if timed_out and not self.rect:
-                    try:
-                        mtime = os.stat(STATE).st_mtime
-                    except OSError:
-                        mtime = 0
-                    if mtime == self.mtime:
-                        continue
-                    self.mtime = mtime
+                try:
+                    mtime = os.stat(STATE).st_mtime
+                except OSError:
+                    mtime = 0
+                if mtime != self.mtime:
+                    if self.mtime is not None and self.rect:
+                        # tablet-ctl writes the file, then sends every setting to Hyprland,
+                        # which resets the pen's area: wait for that, then lock again.
+                        await asyncio.sleep(0.5)
+                        self.rect = None
+                elif timed_out and not self.rect:
+                    continue
+                self.mtime = mtime
                 await self.evaluate()
         finally:
             listener.cancel()

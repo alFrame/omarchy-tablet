@@ -75,6 +75,11 @@ Panel {
   }
   readonly property string helper: pluginDir + "/bin/tablet-ctl"
 
+  // How the area lock engages: "button" (default), "hover" or "tap".
+  readonly property string activateMode: {
+    var v = String(root.s("areaActivate", "button"))
+    return v === "hover" || v === "tap" ? v : "button"
+  }
   readonly property var penActions: [
     { value: "default", label: "App default" },
     { value: "left", label: "Left click" },
@@ -82,7 +87,7 @@ Panel {
     { value: "middle", label: "Middle click" },
     { value: "key", label: "Shortcut" },
     { value: "command", label: "Command" },
-    { value: "arealock", label: "Pen area lock" },
+    { value: "arealock", label: "Pen Area \uf023 / \uf09c" },
     { value: "none", label: "Disabled" }
   ]
   readonly property var padActions: penActions
@@ -667,14 +672,28 @@ Panel {
               spacing: Style.space(6)
               focusable: false
               options: [
-                { value: "tap", label: "Tap", tooltip: "The first tap of the pen on a listed app only activates it: it never paints, selects or clicks" },
-                { value: "hover", label: "Hover", tooltip: "Moving the pen over a listed app is enough. No click needed, but passing over the app locks the pen to it" }
+                { value: "button", label: "Button", tooltip: "A button you assign locks the pen to the app under the pen tip" },
+                { value: "hover", label: "Hover", tooltip: "Moving the pen over a listed app is enough. No click needed, but passing over the app locks the pen to it" },
+                { value: "tap", label: "Tap", tooltip: "Experimental: tap a listed app to lock to it. The tap can draw a dot, or a line" }
               ]
-              value: String(root.s("areaActivate", "tap"))
+              value: root.activateMode
               foreground: root.fg
               fontFamily: root.uiFont
               fontSize: Style.font.bodySmall
               onChanged: function(v) { root.set("areaActivate", v) }
+            }
+
+            Text {
+              width: parent.width
+              text: root.activateMode === "button"
+                ? "Assign a button (Buttons tab, action Pen Area Lock/Unlock). Pressing it locks the pen to the app under the pen tip, and pressing it again releases the pen."
+                : root.activateMode === "hover"
+                  ? "The app is picked up as soon as the pen hovers over it, and the pen area is mapped to it. Release the lock with the mouse, or assign a button to Pen Area Lock/Unlock. Only apps of the Applications tab."
+                  : "EXPERIMENTAL. Tap an app of the Applications tab to activate the area lock. The tap can draw a dot, or a line."
+              color: root.dim
+              font.family: root.uiFont
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
             }
           }
 
@@ -797,7 +816,8 @@ Panel {
           width: parent.width
           spacing: Style.space(14)
 
-          // Dimmed while "Lock pen to app windows" is off; the hover hint says where to turn it on.
+          // Dimmed while "Lock pen to app windows" is off, or in Button mode, which needs no list;
+          // the hover hint says what to change.
           Item {
             width: parent.width
             height: appsBody.height
@@ -806,7 +826,7 @@ Panel {
               id: appsBody
               width: parent.width
               spacing: Style.space(14)
-              enabled: root.s("areaLock", false) === true
+              enabled: root.s("areaLock", false) === true && root.activateMode !== "button"
               opacity: enabled ? 1 : 0.4
               Behavior on opacity { NumberAnimation { duration: 140 } }
 
@@ -965,7 +985,9 @@ Panel {
 
               PanelToolTip {
                 visible: parent.containsMouse
-                text: "Turn on “Lock pen to app windows” in the Pen tab"
+                text: root.s("areaLock", false) !== true
+                  ? "Turn on “Lock pen to app windows” in the Pen tab"
+                  : "Not used in Button mode: the button locks the window under the pen. Switch to Hover or Tap in the Pen tab to use this list."
                 fontFamily: root.uiFont
               }
             }
