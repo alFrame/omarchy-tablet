@@ -339,7 +339,7 @@ async def run_pen(dev, buttons, out, area, rotation):
 
     clone, remap = clone_of(dev, dev.name + tabletlib.REMAP_SUFFIX, rotation)
     dev.grab()
-    swallow = False  # the tip is down on a tap in a file manager, which is dropped
+    swallow = False  # the tip is down on a tap in an app that ignores taps, which is dropped
     ignore = area.ignores_taps()
 
     def handle(ev):
@@ -376,8 +376,8 @@ async def run_pen(dev, buttons, out, area, rotation):
                 if area.rect is None:
                     # Focus follows the pen, so look again rather than trust a flag that may lag a tap.
                     await area.evaluate()
-                if area.in_manager:
-                    swallow = True  # a file manager has focus: the tap is dropped
+                if area.in_ignored:
+                    swallow = True  # an app that ignores taps has focus: the tap is dropped
             for f in frame:
                 handle(f)
             frame = []

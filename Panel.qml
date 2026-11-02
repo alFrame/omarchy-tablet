@@ -218,20 +218,42 @@ Panel {
     set("apps", apps)
   }
 
-  function hasManager(cls) {
-    var list = settings_.fileManagers || []
+  // The apps the tap guard starts with: the file managers (TAP_IGNORED_DEFAULT in bin/tabletarea.py).
+  // They stay in the panel when switched off; apps typed in are removed.
+  readonly property var tapIgnoredDefault: [
+    "org.gnome.Nautilus", "thunar", "org.kde.dolphin", "nemo", "pcmanfm", "pcmanfm-qt", "caja",
+    "spacefm", "org.kde.krusader", "doublecmd", "io.elementary.files", "com.system76.CosmicFiles"
+  ]
+  property bool ignoredOpen: false
+
+  function hasIgnored(cls) {
+    var list = settings_.tapIgnoredApps || []
     for (var i = 0; i < list.length; i++) if (classKey(list[i]) === classKey(cls)) return true
     return false
   }
 
-  function addManager(cls) {
-    cls = String(cls).trim()
-    if (cls === "" || hasManager(cls)) return
-    set("fileManagers", (settings_.fileManagers || []).concat([cls]))
+  function isIgnoredDefault(cls) {
+    for (var i = 0; i < tapIgnoredDefault.length; i++) if (classKey(tapIgnoredDefault[i]) === classKey(cls)) return true
+    return false
   }
 
-  function removeManager(cls) {
-    set("fileManagers", (settings_.fileManagers || []).filter(function(c) { return c !== cls }))
+  function customIgnored() {
+    return (settings_.tapIgnoredApps || []).filter(function(c) { return !isIgnoredDefault(c) })
+  }
+
+  function addIgnored(cls) {
+    cls = String(cls).trim()
+    if (cls === "" || hasIgnored(cls)) return
+    set("tapIgnoredApps", (settings_.tapIgnoredApps || []).concat([cls]))
+  }
+
+  function removeIgnored(cls) {
+    set("tapIgnoredApps", (settings_.tapIgnoredApps || []).filter(function(c) { return classKey(c) !== classKey(cls) }))
+  }
+
+  function toggleIgnored(cls) {
+    if (hasIgnored(cls)) removeIgnored(cls)
+    else addIgnored(cls)
   }
 
   function dismissApp(cls) {
@@ -697,68 +719,122 @@ Panel {
             }
           }
 
-          Header { text: "FILE MANAGERS" }
+          Header { text: "IGNORE PEN TAPS" }
 
           // Independent of the lock and the app list.
           SwitchRow {
-            label: "Ignore pen taps in file managers"
-            tooltip: "The pen tip doesn't click in file managers, so files can't be moved by accident. The mouse and pen buttons still work."
-            checked: root.s("ignoreFileManagerTaps", false) === true
-            onToggled: root.set("ignoreFileManagerTaps", !checked)
+            label: "Ignore pen taps in these apps"
+            tooltip: "The pen tip doesn't click in the apps below, so files can't be moved by accident in a file manager. The mouse and pen buttons still work."
+            checked: root.s("ignoreTaps", false) === true
+            onToggled: root.set("ignoreTaps", !checked)
           }
 
-          // File managers beyond the built-in ones (Nautilus, Thunar, Dolphin, Nemo, PCManFM…).
+          // Starts as the file managers; any app can be added.
           Column {
-            visible: root.s("ignoreFileManagerTaps", false) === true
+            visible: root.s("ignoreTaps", false) === true
             width: parent.width
             spacing: Style.space(8)
 
-            Text {
-              width: parent.width
-              text: "Built in: Nautilus, Thunar, Dolphin, Nemo, PCManFM, Caja and a few more. Using another one? Add its window class (hyprctl clients shows it)."
-              color: root.dim
-              font.family: root.uiFont
-              font.pixelSize: Style.font.caption
-              wrapMode: Text.WordWrap
-            }
-
-            Repeater {
-              model: root.s("fileManagers", [])
-              AppRow {
-                title: modelData
-                primaryIcon: "\uf00d"
-                primaryTip: "Remove"
-                onPrimary: root.removeManager(modelData)
-              }
-            }
-
+            // The list is long and rarely touched, so it stays folded.
             Item {
               width: parent.width
-              implicitHeight: Math.max(managerField.implicitHeight, addManagerButton.implicitHeight)
+              implicitHeight: Style.spacing.controlHeight
               height: implicitHeight
 
-              PlainField {
-                id: managerField
+              Text {
                 anchors.left: parent.left
-                anchors.right: addManagerButton.left
-                anchors.rightMargin: Style.space(6)
+                anchors.right: foldButton.left
+                anchors.rightMargin: Style.space(8)
                 anchors.verticalCenter: parent.verticalCenter
-                placeholderText: "window class, e.g. org.kde.dolphin"
+                textFormat: Text.PlainText
+                text: "Apps (" + (root.s("tapIgnoredApps", []) || []).length + " on)"
+                color: root.fg
+                font.family: root.uiFont
+                font.pixelSize: Style.font.bodySmall
+                elide: Text.ElideRight
+              }
+
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.ignoredOpen = !root.ignoredOpen
               }
 
               Button {
-                id: addManagerButton
+                id: foldButton
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                iconText: "\uf067"
-                tooltipText: "Add this window class"
+                iconText: root.ignoredOpen ? "\uf077" : "\uf078"
+                tooltipText: root.ignoredOpen ? "Hide the list" : "Show the list"
                 bordered: true
                 foreground: root.fg
                 fontFamily: root.uiFont
                 fontSize: Style.font.caption
-                onClicked: {
-                  root.addManager(managerField.text)
-                  managerField.text = ""
+                onClicked: root.ignoredOpen = !root.ignoredOpen
+              }
+            }
+
+            Column {
+              visible: root.ignoredOpen
+              width: parent.width
+              spacing: Style.space(8)
+
+              Text {
+                width: parent.width
+                text: "Starts with the common file managers; switch one off to click in it again. Add any other app by its window class (hyprctl clients shows it)."
+                color: root.dim
+                font.family: root.uiFont
+                font.pixelSize: Style.font.caption
+                wrapMode: Text.WordWrap
+              }
+
+              Repeater {
+                model: root.tapIgnoredDefault
+                SwitchRow {
+                  label: modelData
+                  checked: root.hasIgnored(modelData)
+                  onToggled: root.toggleIgnored(modelData)
+                }
+              }
+
+              Repeater {
+                model: root.customIgnored()
+                AppRow {
+                  title: modelData
+                  primaryIcon: "\uf00d"
+                  primaryTip: "Remove"
+                  onPrimary: root.removeIgnored(modelData)
+                }
+              }
+
+              Item {
+                width: parent.width
+                implicitHeight: Math.max(ignoredField.implicitHeight, addIgnoredButton.implicitHeight)
+                height: implicitHeight
+
+                PlainField {
+                  id: ignoredField
+                  anchors.left: parent.left
+                  anchors.right: addIgnoredButton.left
+                  anchors.rightMargin: Style.space(6)
+                  anchors.verticalCenter: parent.verticalCenter
+                  placeholderText: "window class, e.g. org.kde.dolphin"
+                }
+
+                Button {
+                  id: addIgnoredButton
+                  anchors.right: parent.right
+                  anchors.verticalCenter: parent.verticalCenter
+                  iconText: "\uf067"
+                  tooltipText: "Add this window class"
+                  bordered: true
+                  foreground: root.fg
+                  fontFamily: root.uiFont
+                  fontSize: Style.font.caption
+                  onClicked: {
+                    root.addIgnored(ignoredField.text)
+                    ignoredField.text = ""
+                  }
                 }
               }
             }

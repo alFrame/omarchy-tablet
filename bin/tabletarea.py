@@ -5,11 +5,13 @@ Runs inside tablet-buttons. When "areaLock" is on in
 "apps", the pen is mapped onto that window (Hyprland's region_position /
 region_size) using the largest centred part of the tablet with the window's
 aspect ratio, so circles stay round. When focus moves to any other window the
-pen goes back to the normal mapping from tablet.json.
+pen goes back to the normal mapping from tablet.json (not in button mode, see below).
 
 "areaActivate" decides what engages the lock. "button" (default): only the
 "arealock" key or pen button, which locks the pen to the focused window, listed
-or not, and releases it again. "hover": focus alone on a listed app, which the
+or not, and releases it again. That lock stays on that window, whatever has focus
+(focus follows the mouse, so it can wander), until the key is pressed again, the
+window closes or it leaves the screen. "hover": focus alone on a listed app, which the
 pen gives by moving the cursor. "tap": the first tap of the pen tip on a listed
 app engages the lock once the tip lifts. The tap itself reaches the
 app (a dot, a click): the pen is not grabbed for it, so there is no virtual pen
@@ -31,13 +33,13 @@ HOME = os.path.expanduser("~")
 STATE = os.path.join(HOME, ".config/omarchy/tablet.json")
 CTL = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tablet-ctl")
 
-# Window classes of file managers, in lower case. Dragging a file in one of these is how a pen
-# that touches down by accident moves a folder. More can be added in tablet.json ("fileManagers").
-FILE_MANAGERS = {
-    "org.gnome.nautilus", "nautilus", "thunar", "org.xfce.thunar", "org.kde.dolphin", "dolphin",
-    "nemo", "pcmanfm", "pcmanfm-qt", "caja", "spacefm", "org.kde.krusader", "krusader",
-    "doublecmd", "io.elementary.files", "com.system76.cosmicfiles",
-}
+# Apps whose window ignores the pen tip when "Ignore pen taps" is on: the file managers, where a
+# pen that touches down by accident picks up and moves a folder. This is only the starting list;
+# the user's own list is "tapIgnoredApps" in tablet.json.
+TAP_IGNORED_DEFAULT = [
+    "org.gnome.Nautilus", "thunar", "org.kde.dolphin", "nemo", "pcmanfm", "pcmanfm-qt", "caja",
+    "spacefm", "org.kde.krusader", "doublecmd", "io.elementary.files", "com.system76.CosmicFiles",
+]
 
 POLL = 0.5   # seconds between window checks while locked
 IDLE = 2.0   # seconds between settings-file checks while free
@@ -113,7 +115,7 @@ async def run_cmd(*args, timeout=5):
         return ""
 
 
-Settings = namedtuple("Settings", "lock apps pen size mode ignore managers")
+Settings = namedtuple("Settings", "lock apps pen size mode ignore ignored")
 
 
 class AreaLock:
@@ -122,7 +124,9 @@ class AreaLock:
         self.tip_down = False   # the pen tip touches the tablet: the mapping must not change now
         self.tapped = False     # the tip lifted since the last look: that was a tap on the focused window
         self.focus = None       # class of the focused listed app, if any
-        self.in_manager = False  # a file manager has focus
+        self.focus_addr = None  # address of that window
+        self.pinned = None      # button mode: address of the window the key locked the pen to
+        self.in_ignored = False  # an app that ignores pen taps has focus
         self.active = None      # tap mode: class the pen was activated on
         self.hold = None        # class the pen was released from by hand; hover mode keeps it free until focus leaves
         self.dirty = asyncio.Event()
@@ -131,13 +135,13 @@ class AreaLock:
 
     def settings(self):
         """The settings from tablet.json: whether the area lock is on, the app classes (lower
-        case), the pen device, the tablet size in mm, the activation mode ("button", "hover" or "tap"), whether taps in file managers are
-        ignored, and the file manager classes. The lock and the ignoring are independent."""
+        case), the pen device, the tablet size in mm, the activation mode ("button", "hover" or "tap"), whether taps are
+        ignored, and the classes of the apps that ignore them. The lock and the ignoring are independent."""
         try:
             with open(STATE) as f:
                 data = json.load(f)
         except (OSError, ValueError):
-            return Settings(False, set(), None, None, "button", False, FILE_MANAGERS)
+            return Settings(False, set(), None, None, "button", False, set())
         last = data.get("lastDevice") or {}
         apps = {k.lower() for k, v in (data.get("apps") or {}).items()
                 if isinstance(v, dict) and v.get("mode", "window") == "window"}
@@ -150,17 +154,16 @@ class AreaLock:
         # A quarter-turn tablet is not handled yet. Ignoring taps does not depend on the area.
         if data.get("rotation", 0) in (90, 270):
             lock = False
-        extra = {c.lower() for c in (data.get("fileManagers") or []) if isinstance(c, str)}
-        return Settings(lock, apps, last.get("pen"), size, mode,
-                        data.get("ignoreFileManagerTaps") is True, FILE_MANAGERS | extra)
+        ignored = {c.lower() for c in data.get("tapIgnoredApps", TAP_IGNORED_DEFAULT) if isinstance(c, str)}
+        return Settings(lock, apps, last.get("pen"), size, mode, data.get("ignoreTaps") is True, ignored)
 
     def swallows_taps(self):
         """True when the pen has to be routed through tablet-buttons' virtual pen so taps can be
-        dropped, which is only to ignore taps in file managers. Tap activation does not need it."""
+        dropped, which is only to ignore taps in some apps. Tap activation does not need it."""
         return self.settings().ignore
 
     def ignores_taps(self):
-        """True when taps are dropped while a file manager has focus.
+        """True when taps are dropped while one of the listed apps has focus.
 
         This keeps a pen swept across a file manager from picking up and moving files. It works
         with or without the area lock."""
@@ -182,13 +185,16 @@ class AreaLock:
         Letting go is what lets a pen-only user leave the window without the mouse. The pen is
         still over the app when the key is pressed, so in hover mode, where focus alone locks,
         `hold` stops the lock from coming straight back; it lasts until focus moves elsewhere.
-        In tap and button mode locking is an explicit choice, so nothing needs holding."""
-        if self.rect is not None:
+        In tap and button mode locking is an explicit choice, so nothing needs holding. In button
+        mode the lock is to the window, not to its class, so it survives a change of focus."""
+        if self.rect is not None or self.pinned:
             self.active = None
+            self.pinned = None
             self.hold = self.focus
         elif self.focus:
             self.hold = None
             self.active = self.focus
+            self.pinned = self.focus_addr
         self.dirty.set()
 
     def reapply(self):
@@ -215,24 +221,37 @@ class AreaLock:
             await self._evaluate()
 
     async def _evaluate(self):
-        lock, apps, pen, size, mode, ignore, managers = self.settings()
+        lock, apps, pen, size, mode, ignore, ignored = self.settings()
         want = None
         window = {}
         self.focus = None
-        self.in_manager = False
-        if lock or ignore:
+        self.in_ignored = False
+        name = None
+        if not lock or mode != "button":
+            self.pinned = None
+        if lock and self.pinned:
+            # The key locked the pen to this window: focus does not matter, only that it is still shown.
+            pinned = await self.pinned_window()
+            if pinned:
+                want = self.target(pinned, size)
+                name = pinned.get("class")
+            else:
+                self.pinned = None
+        if (lock and not self.pinned) or ignore:
             try:
                 window = json.loads(await run_cmd("hyprctl", "activewindow", "-j") or "{}")
             except ValueError:
                 window = {}
-            self.in_manager = ignore and window.get("class", "").lower() in managers
+            self.in_ignored = ignore and window.get("class", "").lower() in ignored
             cls = window.get("class", "").lower()
             if cls and (mode == "button" or cls in apps) and window.get("mapped", True):
                 self.focus = cls
+                self.focus_addr = window.get("address")
                 if self.tapped and lock and mode == "tap":
                     self.active = self.focus  # a tap on a listed app is the choice to lock
                     self.hold = None
-                if lock and ((self.hold != self.focus) if mode == "hover" else (self.active == self.focus)):
+                # Button mode locks through `pinned`, above, not through focus.
+                if lock and ((mode == "hover" and self.hold != self.focus) or (mode == "tap" and self.active == self.focus)):
                     want = self.target(window, size)
         self.tapped = False
         if self.focus != self.active:
@@ -252,10 +271,24 @@ class AreaLock:
                 "absolute_region_position": "true",
             })
             if self.rect is None:
-                log("locked to", window.get("class"))
+                log("locked to", name or window.get("class"))
         else:
             await self.release(pen)
         self.rect = want
+
+    async def pinned_window(self):
+        """The window the button locked the pen to, or None once it has closed or left the screen."""
+        try:
+            clients = json.loads(await run_cmd("hyprctl", "clients", "-j") or "[]")
+            monitors = json.loads(await run_cmd("hyprctl", "monitors", "-j") or "[]")
+        except ValueError:
+            return None
+        window = next((c for c in clients if c.get("address") == self.pinned), None)
+        if not window or not window.get("mapped", True) or window.get("hidden"):
+            return None
+        shown = {m.get("activeWorkspace", {}).get("id") for m in monitors}
+        shown |= {m.get("specialWorkspace", {}).get("id") for m in monitors}
+        return window if window.get("workspace", {}).get("id") in shown else None
 
     async def apply(self, pen, options):
         body = ", ".join(f'{k} = {v}' if v in ("true", "false") else f'{k} = "{v}"'

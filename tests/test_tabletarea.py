@@ -1,4 +1,5 @@
 """Checks for the pure parts of bin/tabletarea.py. Run: python3 -m unittest discover tests"""
+import json
 import os
 import sys
 import unittest
@@ -129,17 +130,92 @@ class SettingsFile(unittest.TestCase):
         self.assertFalse(self.settings({**self.BASE, "rotation": 90}).lock)
         self.assertFalse(self.settings({**self.BASE, "areaLock": False}).lock)
 
-    def test_ignoring_file_manager_taps_is_off_by_default_and_independent_of_the_lock(self):
+    def test_ignoring_taps_is_off_by_default_and_independent_of_the_lock(self):
         self.assertFalse(self.settings(self.BASE).ignore)
         # No lock, no apps, a quarter-turn tablet: ignoring taps does not depend on any of them.
-        s = self.settings({"ignoreFileManagerTaps": True, "rotation": 90})
+        s = self.settings({"ignoreTaps": True, "rotation": 90})
         self.assertFalse(s.lock)
         self.assertTrue(s.ignore)
 
-    def test_file_managers_are_built_in_plus_the_users_own(self):
-        s = self.settings({"ignoreFileManagerTaps": True, "fileManagers": ["MyFiles"]})
-        self.assertIn("org.gnome.nautilus", s.managers)
-        self.assertIn("myfiles", s.managers)  # lower case, like the window class it is compared with
+    def test_ignored_apps_start_as_the_file_managers_and_are_the_users_to_change(self):
+        s = self.settings({"ignoreTaps": True})
+        self.assertIn("org.gnome.nautilus", s.ignored)  # lower case, like the window class it is compared with
+        s = self.settings({"ignoreTaps": True, "tapIgnoredApps": ["MyApp"]})
+        self.assertEqual(s.ignored, {"myapp"})  # the list replaces the starting one, nothing stays built in
+
+
+class Pinned(unittest.IsolatedAsyncioTestCase):
+    """Button mode: the key locks the pen to a window, and focus moving away does not release it."""
+
+    def setUp(self):
+        self.a = tabletarea.AreaLock()
+        self.a.settings = lambda: tabletarea.Settings(True, set(), "pen", PTH650, "button", False, set())
+        self.log = []
+        self.clients = [{"address": "0xa", "class": "krita", "at": [0, 0], "size": [800, 600],
+                         "mapped": True, "workspace": {"id": 1}},
+                        {"address": "0xb", "class": "foot", "at": [800, 0], "size": [800, 600],
+                         "mapped": True, "workspace": {"id": 1}}]
+        self.focused = self.clients[0]
+
+        async def run_cmd(*args, timeout=5):
+            return json.dumps({"activewindow": self.focused, "clients": self.clients,
+                               "monitors": [{"activeWorkspace": {"id": 1}, "specialWorkspace": {"id": 0}}]}[args[1]])
+
+        async def apply(pen, options):
+            self.log.append("apply")
+
+        async def release(pen=None):
+            self.log.append("release")
+            self.a.rect = None
+
+        tabletarea.run_cmd, self.saved = run_cmd, tabletarea.run_cmd
+        self.a.apply, self.a.release = apply, release
+
+    def tearDown(self):
+        tabletarea.run_cmd = self.saved
+
+    async def test_lock_stays_on_its_window_when_focus_moves(self):
+        await self.a.evaluate()
+        self.a.toggle()
+        await self.a.evaluate()
+        self.assertEqual(self.log, ["apply"])
+        locked = self.a.rect
+        self.focused = self.clients[1]  # focus follows the mouse onto the neighbour
+        await self.a.evaluate()
+        self.assertEqual(self.log, ["apply"])
+        self.assertEqual(self.a.rect, locked)
+
+    async def test_key_releases_it_and_the_window_closing_does_too(self):
+        await self.a.evaluate()
+        self.a.toggle()
+        await self.a.evaluate()
+        self.a.toggle()
+        await self.a.evaluate()
+        self.assertEqual(self.log, ["apply", "release"])
+        self.a.toggle()  # locks the focused window again
+        await self.a.evaluate()
+        self.clients.pop(0)
+        self.focused = self.clients[0]
+        await self.a.evaluate()
+        self.assertEqual(self.log, ["apply", "release", "apply", "release"])
+        self.assertIsNone(self.a.pinned)
+
+    async def test_tap_guard_still_sees_the_focused_window_while_the_lock_is_pinned(self):
+        self.a.settings = lambda: tabletarea.Settings(True, set(), "pen", PTH650, "button", True, {"foot"})
+        await self.a.evaluate()
+        self.a.toggle()
+        self.focused = self.clients[1]  # the lock stays on krita while foot has focus
+        await self.a.evaluate()
+        self.assertEqual(self.log, ["apply"])
+        self.assertTrue(self.a.in_ignored)
+
+    async def test_window_on_another_workspace_releases_it(self):
+        await self.a.evaluate()
+        self.a.toggle()
+        await self.a.evaluate()
+        self.clients[0]["workspace"]["id"] = 2
+        await self.a.evaluate()
+        self.assertEqual(self.log, ["apply", "release"])
 
 
 if __name__ == "__main__":
