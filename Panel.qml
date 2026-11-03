@@ -617,20 +617,24 @@ Panel {
             step: 5
             integer: true
             value: root.s("areaPercent", 100)
-            valueText: Math.round(liveValue) + "% · " + root.area.w + "×" + root.area.h + " mm"
+            valueText: Math.round(liveValue) + "% · " + (root.rotation_ === 90 || root.rotation_ === 270 ? root.area.h + "×" + root.area.w : root.area.w + "×" + root.area.h) + " mm"
             onCommit: function(v) { root.set("areaPercent", Math.round(v)) }
           }
 
-          // Scale drawing of the tablet surface with the active area inside.
+          // Scale drawing of the tablet surface with the active area inside, turned as the tablet is held.
           Item {
+            readonly property bool quarter: root.rotation_ === 90 || root.rotation_ === 270
             width: parent.width
-            height: Style.space(84)
+            height: Style.space(quarter ? 150 : 84)
 
             Rectangle {
               id: surface
-              readonly property real k: Math.min(parent.width / root.tabletMm.w, parent.height / root.tabletMm.h)
-              width: root.tabletMm.w * k
-              height: root.tabletMm.h * k
+              readonly property bool quarter: parent.quarter
+              readonly property real tw: quarter ? root.tabletMm.h : root.tabletMm.w
+              readonly property real th: quarter ? root.tabletMm.w : root.tabletMm.h
+              readonly property real k: Math.min(parent.width / tw, parent.height / th)
+              width: tw * k
+              height: th * k
               anchors.centerIn: parent
               color: "transparent"
               radius: Style.cornerRadius
@@ -638,10 +642,10 @@ Panel {
               border.color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.3)
 
               Rectangle {
-                x: root.area.x * surface.k
-                y: root.area.y * surface.k
-                width: root.area.w * surface.k
-                height: root.area.h * surface.k
+                x: (surface.quarter ? root.area.y : root.area.x) * surface.k
+                y: (surface.quarter ? root.area.x : root.area.y) * surface.k
+                width: (surface.quarter ? root.area.h : root.area.w) * surface.k
+                height: (surface.quarter ? root.area.w : root.area.h) * surface.k
                 radius: Style.cornerRadius
                 color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.14)
                 border.width: 1
