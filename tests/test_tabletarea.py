@@ -220,3 +220,16 @@ class Pinned(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MonitorReport(unittest.TestCase):
+    """tablet-ctl hands the panel each monitor's place in the layout, to draw the desktop."""
+
+    def test_report_carries_the_geometry(self):
+        from importlib.machinery import SourceFileLoader
+        ctl = SourceFileLoader("tablet_ctl", os.path.join(os.path.dirname(__file__), "..", "bin", "tablet-ctl")).load_module()
+        mons = [{"name": "DP-1", "description": "Eizo", "x": 2560, "y": 0, "w": 2560.0, "h": 1440.0},
+                {"name": "DP-2", "description": "Tall", "x": 5120, "y": -560, "w": 1440.0, "h": 2560.0}]
+        report = ctl.monitor_report(mons)
+        self.assertEqual(report[1], {"name": "DP-2", "description": "Tall", "x": 5120, "y": -560, "w": 1440.0, "h": 2560.0})
+        self.assertEqual([m["name"] for m in report], ["DP-1", "DP-2"])

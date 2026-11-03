@@ -148,6 +148,12 @@ def monitors():
     return result
 
 
+def monitor_report(mons):
+    """What the panel draws of the desktop: each monitor's name, description and place in the layout."""
+    return [{"name": m["name"], "description": m["description"],
+             "x": m["x"], "y": m["y"], "w": m["w"], "h": m["h"]} for m in mons]
+
+
 def target_aspect(s, mons):
     chosen = [m for m in mons if m["name"] == s["output"]] or mons
     if not chosen:
@@ -404,7 +410,7 @@ def status(s, error=""):
         "buttonsService": daemon_running(),
         "inputAccess": input_access(tablet),
         "wacomDriver": os.path.isdir("/sys/module/wacom"),
-        "monitors": [{"name": m["name"], "description": m["description"]} for m in mons],
+        "monitors": monitor_report(mons),
         "area": area(s, mons, size),
         "tabletMm": {"w": size[0], "h": size[1]},
         "error": error,

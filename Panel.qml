@@ -621,15 +621,21 @@ Panel {
             onCommit: function(v) { root.set("areaPercent", Math.round(v)) }
           }
 
-          // Scale drawing of the tablet surface with the active area inside, turned as the tablet is held.
+          // Scale drawing of the tablet surface with the active area inside, turned as the tablet is held,
+          // and beside it the desktop: the screens the pen is mapped to are filled.
           Item {
             readonly property bool quarter: root.rotation_ === 90 || root.rotation_ === 270
             width: parent.width
             height: Style.space(quarter ? 150 : 84)
 
+            Item {
+              id: tabletBox
+              width: root.monitors.length ? parent.width * 0.42 : parent.width
+              height: parent.height
+
             Rectangle {
               id: surface
-              readonly property bool quarter: parent.quarter
+              readonly property bool quarter: tabletBox.parent.quarter
               readonly property real tw: quarter ? root.tabletMm.h : root.tabletMm.w
               readonly property real th: quarter ? root.tabletMm.w : root.tabletMm.h
               readonly property real k: Math.min(parent.width / tw, parent.height / th)
@@ -654,6 +660,56 @@ Panel {
                 Behavior on y { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
                 Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
                 Behavior on height { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+              }
+            }
+            }
+
+            Item {
+              id: desktop
+              visible: root.monitors.length > 0
+              x: tabletBox.width
+              width: parent.width - tabletBox.width
+              height: parent.height
+
+              // Bounding box of all screens, which is what an empty Output maps the pen to.
+              readonly property var box: {
+                var x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9
+                for (var i = 0; i < root.monitors.length; i++) {
+                  var m = root.monitors[i]
+                  if (m.w === undefined) continue
+                  x0 = Math.min(x0, m.x); y0 = Math.min(y0, m.y)
+                  x1 = Math.max(x1, m.x + m.w); y1 = Math.max(y1, m.y + m.h)
+                }
+                return x1 > x0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : { x: 0, y: 0, w: 1, h: 1 }
+              }
+              readonly property real k: Math.min((width - Style.space(12)) / box.w, height / box.h)
+
+              Item {
+                anchors.centerIn: parent
+                width: desktop.box.w * desktop.k
+                height: desktop.box.h * desktop.k
+
+                // With every screen as the Output the pen covers the whole box, empty corners too.
+                Rectangle {
+                  anchors.fill: parent
+                  visible: root.s("output", "") === ""
+                  color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.1)
+                }
+
+                Repeater {
+                  model: root.monitors
+                  Rectangle {
+                    readonly property bool mapped: root.s("output", "") === "" || root.s("output", "") === modelData.name
+                    visible: modelData.w !== undefined
+                    x: (modelData.x - desktop.box.x) * desktop.k
+                    y: (modelData.y - desktop.box.y) * desktop.k
+                    width: modelData.w * desktop.k
+                    height: modelData.h * desktop.k
+                    color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, mapped ? 0.18 : 0.04)
+                    border.width: 1
+                    border.color: mapped ? root.fg : Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.3)
+                  }
+                }
               }
             }
           }
